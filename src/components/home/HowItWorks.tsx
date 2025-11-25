@@ -10,7 +10,7 @@ export default function HowItWorks() {
         <h2 className='font-king text-[40px] sm:text-[48px] md:text-[56px] leading-[110%] tracking-[-0.05em] text-stroke'>
           How it works
         </h2>
-        <p className='mt-3 max-w-2xl font-[Arial] text-[16px] sm:text-[18px] leading-[110%] tracking-[0] text-primary'>
+        <p className='mt-3 max-w-2xl text-[16px] sm:text-[18px] leading-[110%] tracking-[0] text-primary'>
           Easily find the lowest supplement prices in just a few clicks. Instantly compare trusted
           retailers and shop smarter for your wallet.
         </p>
@@ -33,7 +33,7 @@ export default function HowItWorks() {
             <h3 className='mt-6 text-lg sm:text-xl md:text-2xl font-bold'>
               Compare prices instantly
             </h3>
-            <p className='mt-2 mb-8 md:mb-12 font-[Arial] text-[16px] sm:text-[18px] leading-[110%] tracking-[0] text-primary'>
+            <p className='mt-2 mb-8 md:mb-12 text-[16px] sm:text-[18px] leading-[110%] tracking-[0] text-primary'>
               We pull in prices from top NZ supplement stores so you can see who&apos;s cheapest at
               a glance and click straight through.
             </p>
@@ -51,7 +51,7 @@ export default function HowItWorks() {
             draggable='false'
           />
 
-          <p className='mt-8 text-base font-[Arial] text-[16px] sm:text-[18px] leading-[110%] tracking-[0] text-primary'>
+          <p className='mt-8 text-base text-[16px] sm:text-[18px] leading-[110%] tracking-[0] text-primary'>
             Discover your favourite supplement brands
           </p>
 
