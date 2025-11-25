@@ -41,7 +41,8 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
   const products: Product[] = [];
   const errors: string[] = [];
   // Browser for scraping flavours for each product
-  const browser = await chromium.launch({
+  // Launch options (re-used when we recycle the browser)
+  const launchOptions = {
     headless: true,
     args: [
       '--no-sandbox',
@@ -50,14 +51,19 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
       '--single-process',
       '--disable-gpu',
     ],
-  });
-  const context = await browser.newContext({
+  };
+
+  const contextOptions = {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
     locale: 'en-NZ',
     timezoneId: 'Pacific/Auckland',
-  });
-  const page = await context.newPage();
+  };
+
+  // Browser for scraping flavours for each product
+  let browser = await chromium.launch(launchOptions);
+  let context = await browser.newContext(contextOptions);
+  let page = await context.newPage();
 
   let flavoursChecked = 0;
   let flavoursFound = 0;
@@ -71,6 +77,8 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
 
   const $cards = $('.product'); // cheerio collection of product cards
   console.log(`Product cards found: ${$cards.length}`);
+  const totalCards = $cards.length;
+  let processed = 0;
   if ($cards.length === 0) {
     await browser.close();
     return { products, errors };
@@ -83,6 +91,8 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
       const maxRuntime = Number(process.env.MAX_MS || 0);
       if (maxRuntime && Date.now() - startTime > maxRuntime) break;
     }
+
+    processed++;
 
     try {
       const $card = $(element); // Make a Cheerio wrapper
@@ -191,6 +201,24 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
       products.push(product);
     } catch (e: any) {
       errors.push(e?.message ?? String(e));
+    }
+
+    // Recycle browser every 40 products to keep memory under control
+    if (processed > 0 && processed % 40 === 0) {
+      console.log(
+        `SprintFit: processed ${processed}/${totalCards}, recycling browser to free memory`
+      );
+      try {
+        await page.close().catch(() => {});
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+      } catch {
+        // ignore cleanup errors
+      }
+
+      browser = await chromium.launch(launchOptions);
+      context = await browser.newContext(contextOptions);
+      page = await context.newPage();
     }
   }
 
