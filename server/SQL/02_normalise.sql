@@ -11,6 +11,68 @@ FROM
 WHERE
   in_stock = TRUE;
 
+-- Helper: strip specific phrases/variants from a string
+CREATE OR REPLACE FUNCTION remove_phrases(src citext, phrase1 citext, variant1 text, phrase2 citext, variant2 text)
+  RETURNS citext
+  LANGUAGE plpgsql
+  IMMUTABLE
+  AS $$
+DECLARE
+  tmp text := src::text;
+  pat text;
+BEGIN
+  IF phrase1 IS NOT NULL AND phrase1 <> '' THEN
+    pat := regexp_replace(phrase1::text, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- variant1 (no-spaces version)
+  IF variant1 IS NOT NULL AND variant1 <> '' THEN
+    pat := regexp_replace(variant1, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- phrase2
+  IF phrase2 IS NOT NULL AND phrase2 <> '' THEN
+    pat := regexp_replace(phrase2::text, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- variant2 (no-spaces version)
+  IF variant2 IS NOT NULL AND variant2 <> '' THEN
+    pat := regexp_replace(variant2, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- collapse extra spaces
+  tmp := btrim(regexp_replace(tmp, '\s{2,}', ' ', 'g'));
+  RETURN tmp::citext;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION remove_phrases(src citext, VARIADIC phrases text[])
+  RETURNS citext
+  LANGUAGE plpgsql
+  IMMUTABLE
+  AS $$
+DECLARE
+  tmp text := src::text;
+  p text;
+  pat text;
+BEGIN
+  IF phrases IS NULL THEN
+    RETURN src;
+  END IF;
+  FOREACH p IN ARRAY phrases LOOP
+    IF p IS NULL OR p = '' THEN
+      CONTINUE;
+    END IF;
+    pat := regexp_replace(p, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END LOOP;
+  tmp := btrim(regexp_replace(tmp, '\s{2,}', ' ', 'g'));
+  RETURN tmp::citext;
+END;
+$$;
+
+THEN
+save / exit:
 -- Parse scraped flavour strings and expands into rows to extract out of stock flags and price adjustments
 -- e.g. "Chocolate +$2.00" -> amount_cents =+ 2.00
 -- e.g. "Vanilla (Out of Stock) -> in_stock = FALSE
