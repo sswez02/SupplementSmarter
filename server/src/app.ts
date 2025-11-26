@@ -65,6 +65,8 @@ app.get('/api/protein', async (_req, res) => {
       `
     );
 
+    console.log('Query Result:', result.rows);
+
     const rows = result.rows.map((r) => {
       const weightGrams = r.weight_grams as number | null;
       const weightKg = weightGrams != null ? weightGrams / 1000 : null;
