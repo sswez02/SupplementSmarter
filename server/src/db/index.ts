@@ -2,11 +2,12 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
+console.log('Debug: DATABASE_URL:', process.env.DATABASE_URL);
 
 const { Pool } = pg;
 const connectionString = process.env.DATABASE_URL;
 
-export const pool = connectionString
+const pool = connectionString
   ? new Pool({ connectionString })
   : new Pool({
       host: process.env.PGHOST || 'localhost',
@@ -15,3 +16,15 @@ export const pool = connectionString
       password: process.env.PGPASSWORD || '',
       database: process.env.PGDATABASE || 'supplements',
     });
+
+// Debugging the database connection
+pool
+  .connect()
+  .then(() => {
+    console.log('Database connected successfully');
+  })
+  .catch((err) => {
+    console.error('Database connection failed:', err);
+  });
+
+export { pool };
