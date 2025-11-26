@@ -233,7 +233,7 @@ insert_offers AS (
     oa.flavours,
     oa.price,
     oa.currency,
-    MIN(c.url) AS url -- any URL among those with the min price for that retailer
+    MIN(c.url) AS url -
   FROM
     offers_aggregated oa
     JOIN cheapest c ON c.product_id = oa.product_id
@@ -248,40 +248,37 @@ insert_offers AS (
     oa.retailer,
     oa.flavours,
     oa.price,
-    oa.currency
-  RETURNING
-    1)
-  -- Step 4b: insert into products_final, picking a URL for the global lowest price
-  INSERT INTO products_final(product_id, brand, name, weight_grams, flavours, price, currency, url, value_score, slug)
-  SELECT
-    s.product_id,
-    s.brand,
-    s.name,
-    s.weight_grams,
-    s.flavours,
-    s.min_price AS price,
-    s.currency,
-    MIN(c.url) AS url, -- any URL among those with the global min price
-    s.value_score,
-    regexp_replace(regexp_replace(lower(unaccent(COALESCE(s.brand, '') || ' ' || COALESCE(s.name, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
-              ''
-            ELSE
-              trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
-            END)), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g') AS slug
-  FROM
-    scored s
-    JOIN cheapest c ON c.product_id = s.product_id
-      AND c.currency = s.currency
-      AND c.price = s.min_price
-  GROUP BY
-    s.product_id,
-    s.brand,
-    s.name,
-    s.weight_grams,
-    s.flavours,
-    s.min_price,
-    s.currency,
-    s.value_score;
+    oa.currency;
+
+RETURNING
+  1)
+-- Step 4b: insert into products_final, picking a URL for the global lowest price
+INSERT INTO products_final(product_id, brand, name, weight_grams, flavours, price, currency, url, value_score, slug)
+SELECT
+  s.product_id,
+  s.brand,
+  s.name,
+  s.weight_grams,
+  s.flavours,
+  s.min_price AS price,
+  s.currency,
+  MIN(c.url) AS url, -- URL for the lowest price
+  s.value_score,
+  slugify(s.brand || ' ' || s.name || ' ' || COALESCE(s.weight_grams, '')) AS slug
+FROM
+  scored s
+  JOIN cheapest c ON c.product_id = s.product_id
+    AND c.currency = s.currency
+    AND c.price = s.min_price
+GROUP BY
+  s.product_id,
+  s.brand,
+  s.name,
+  s.weight_grams,
+  s.flavours,
+  s.min_price,
+  s.currency,
+  s.value_score;
 
 -- Step 5: snapshot today's prices into history (protein)
 INSERT INTO price_history(category, product_id, weight_grams, retailer, price, currency, snapshot_date)
@@ -289,7 +286,7 @@ SELECT
   'protein'::citext AS category,
   product_id,
   weight_grams,
-  retailer,
+  retailer, -- Include retailer for accurate historical tracking
   price,
   currency,
   CURRENT_DATE AS snapshot_date
@@ -311,6 +308,6 @@ CREATE OR REPLACE FUNCTION slugify(input text)
   IMMUTABLE
   AS $$
   SELECT
-    regexp_replace(regexp_replace(lower(unaccent(input)), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g');
+    regexp_replace(regexp_replace(lower(unaccent(input || ' ' || 'retailer')), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g');
 $$;
 
