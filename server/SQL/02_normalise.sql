@@ -254,6 +254,7 @@ ON CONFLICT (flavour_scraped)
 
 -- Chemist Warehouse: derive flavours from product name when placeholder is used
 -- This runs after flavours_collection has been populated
+-- Update flavours for Chemist Warehouse: derive flavours from product name when placeholder is used
 UPDATE
   scraped_products sp
 SET
@@ -262,34 +263,13 @@ SET
       array_agg(fc.flavour_normalised::citext ORDER BY fc.flavour_normalised)
     FROM flavours_collection fc
     WHERE
-      -- Match flavour as a whole word/phrase
-      regexp_replace(unaccent(lower(sp.name_scraped)), '[^a-z0-9]+', ' ', 'g') ~('(^|\\s)' || regexp_replace(unaccent(lower(fc.flavour_normalised)), '[^a-z0-9]+', ' ', 'g') || '(\\s|$)')),
-    -- if no flavour found, fall back to empty array instead of 'to be processed'
-    '{}'::citext[])
+      -- Match flavour as a whole word/phrase in name_scraped
+      regexp_replace(unaccent(lower(sp.name_scraped)), '[^a-z0-9]+', ' ', 'g') ~('(^|\\s)' || regexp_replace(unaccent(lower(fc.flavour_normalised)), '[^a-z0-9]+', ' ', 'g') || '(\\s|$)')), '{}'::citext[]) -- default to empty array if no flavour is found
 WHERE
   sp.retailer = 'Chemist Warehouse'
   AND sp.flavours_scraped = ARRAY['to be processed']::citext[];
 
--- Brand normalisation upsert into brands_collection + brands_alias
-INSERT INTO brands_collection(brand_normalised)
-SELECT DISTINCT
-  rep
-FROM
-  brand_best_rep
-ON CONFLICT (brand_normalised)
-  DO NOTHING;
-
-INSERT INTO brands_alias(brand_scraped, brand_id)
-SELECT
-  b.variant AS brand_scraped,
-  bc.brand_id
-FROM
-  brand_best_rep b
-  JOIN brands_collection bc ON bc.brand_normalised = b.rep
-ON CONFLICT (brand_scraped)
-  DO UPDATE SET
-    brand_id = EXCLUDED.brand_id;
-
+-- This condition ensures the update is only applied to products that have the placeholder 'to be processed'
 -- Cleaned product base name (no brand / flavour / size)
 CREATE OR REPLACE VIEW name_cleaned AS
 WITH base AS (
