@@ -44,6 +44,7 @@ function getSearchQuery(raw: unknown): string {
 //  then lowest price
 app.get('/api/protein', async (_req, res) => {
   try {
+    console.log('Starting query to fetch proteins...');
     const result = await pool.query(
       `
       SELECT
