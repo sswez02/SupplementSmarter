@@ -100,8 +100,9 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
   const products: Product[] = [];
   const errors: string[] = [];
   const knownBrands = (await collectBrands()).map((b) => b.trim()).filter(Boolean);
-  // Browser for scraping flavours for each product
-  const browser = await chromium.launch({
+
+  // Launch options (re-used when we recycle the browser)
+  const launchOptions = {
     headless: true,
     args: [
       '--no-sandbox',
@@ -110,14 +111,19 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
       '--single-process',
       '--disable-gpu',
     ],
-  });
-  const context = await browser.newContext({
+  };
+
+  const contextOptions = {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
-    locale: 'en-NZ',
+    locale: 'en-NZ' as const,
     timezoneId: 'Pacific/Auckland',
-  });
-  const page = await context.newPage();
+  };
+
+  // Browser for scraping flavours for each product
+  let browser = await chromium.launch(launchOptions);
+  let context = await browser.newContext(contextOptions);
+  let page: Page = await context.newPage();
 
   let flavoursChecked = 0;
   let flavoursFound = 0;
@@ -126,11 +132,12 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
 
   // Loading HTML into cheerio
   const $ = cheerio.load(html);
-  // console.log('HTML length:', html.length);
-  // console.log('HTML preview:\n', html.slice(0, 1500));
 
   const $cards = $('.deal_body'); // cheerio collection of product cards
   console.log(`Product cards found: ${$cards.length}`);
+  const totalCards = $cards.length;
+  let processed = 0;
+
   if ($cards.length === 0) {
     await browser.close();
     return { products, errors };
@@ -143,6 +150,8 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
       const maxRuntime = Number(process.env.MAX_MS || 0);
       if (maxRuntime && Date.now() - startTime > maxRuntime) break;
     }
+
+    processed++;
 
     try {
       const $card = $(element); // Make a Cheerio wrapper
@@ -158,6 +167,7 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
       //    </h2>
       //  </div>
       const scrapedName = $card.find('.deal_title').text().trim();
+
       // eg:
       //   <div class='deal_price_wrap'>
       //     <div class='deal_price_before_wrap'>
@@ -170,11 +180,11 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
       //     </div>
       //   </div>;
       const $priceElement = $card.find('.deal_price_wrap').first();
-      // Filter by type attributes
       const scrapedPrice =
         $priceElement.find('.deal_price_now .price').first().text().trim() || // "$48.97"
         $priceElement.find('.deal_price_before_wrap .price').first().text().trim() || // fallback if no price now
         $priceElement.find('.price-area .price').first().text().trim(); // final fallback
+
       if (!scrapedPrice) {
         errors.push(`No price, skipping #${index} url=${productUrl}`);
         continue; // skip this card
@@ -184,16 +194,9 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
       const inStock = $priceElement.length > 0 && $priceElement.text().trim().length > 0;
 
       // Normalised fields
-      // Search for brand in name using known brands list (from https://xplosiv.nz/brands)
-      // If found, remove it from the name and use it as the brand field
-      const { brand: detectedBrand, baseName } = splitBrandFromName(scrapedName, knownBrands);
+      const { brand: detectedBrand } = splitBrandFromName(scrapedName, knownBrands);
       const brand = detectedBrand ?? 'NoWhey';
-      // Removes weight info (e.g., "- 1kg", "- 1000 g") and anything that follows it
-      // Examples:
-      //  "Whey Isolate - 1kg"            -> "Whey Isolate"
-      //  "Whey Isolate-1000 g (Vanilla)" -> "Whey Isolate"
-      //  "Casein - 500G"                 -> "Casein"
-      // Captialises the resulting name
+
       const name = captialisation(scrapedName.replace(/\s*-\s*\d+\s*(g|kg).*/i, '').trim());
 
       // Use the collectFlavours browser to get the list of flavours
@@ -218,7 +221,7 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
       const price = normalisePrice(priceRange);
 
       const product: Product = {
-        id: `${brand}:${name}:${weight_g ?? 'na'}`.toLowerCase().replace(/\s+/g, '_'), // nzprotein:whey_isolate:1000
+        id: `${brand}:${name}:${weight_g ?? 'na'}`.toLowerCase().replace(/\s+/g, '_'), // nowhey:product:1000
         brand,
         name,
         price,
@@ -226,7 +229,6 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
         url: productUrl,
         scrapedAt: new Date().toISOString(),
         retailer: 'NoWhey',
-        // include only when defined
         ...(weight_g !== undefined ? { weight_grams: weight_g } : {}),
         ...(flavours.size ? { flavours: [...flavours] } : {}),
       };
@@ -234,11 +236,31 @@ export const scrapeNoWheyCreatine = async (): Promise<ScrapeResult> => {
     } catch (e: any) {
       errors.push(e?.message ?? String(e));
     }
+
+    // Recycle browser every 40 products to keep memory under control
+    if (processed > 0 && processed % 40 === 0 && processed < totalCards) {
+      console.log(
+        `NoWhey (creatine): processed ${processed}/${totalCards}, recycling browser to free memory`
+      );
+      try {
+        await page.close().catch(() => {});
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+      } catch {
+        // ignore cleanup errors
+      }
+
+      browser = await chromium.launch(launchOptions);
+      context = await browser.newContext(contextOptions);
+      page = await context.newPage();
+    }
   }
 
   await browser.close();
 
-  console.log(`NZProtein: scraped ${products.length} products`);
+  console.log(
+    `NoWhey creatine: scraped ${products.length} products. Flavours checked ${flavoursChecked}, flavours found ${flavoursFound}.`
+  );
 
   return { products, errors };
 };
