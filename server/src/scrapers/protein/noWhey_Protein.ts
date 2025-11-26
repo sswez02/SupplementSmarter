@@ -2,7 +2,7 @@ import { fetchHtml } from '../common/fetch.js';
 import { captialisation, normalisePrice, weightGrams } from '../common/normalise.js';
 import type { Product, ScrapeResult } from '../common/types.js';
 import * as cheerio from 'cheerio';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page, type LaunchOptions } from 'playwright';
 
 // Helper to open brands page and collect brand names
 async function collectBrands(): Promise<string[]> {
@@ -102,7 +102,7 @@ export const scrapeNoWheyProtein = async (): Promise<ScrapeResult> => {
   const knownBrands = (await collectBrands()).map((b) => b.trim()).filter(Boolean);
 
   // Launch options (re-used when we recycle the browser)
-  const launchOptions = {
+  const launchOptions: LaunchOptions = {
     headless: true,
     args: [
       '--no-sandbox',

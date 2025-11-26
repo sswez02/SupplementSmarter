@@ -2,7 +2,7 @@ import { fetchHtml } from '../common/fetch.js';
 import { captialisation, normalisePrice, weightGrams } from '../common/normalise.js';
 import type { Product, ScrapeResult } from '../common/types.js';
 import * as cheerio from 'cheerio';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page, type LaunchOptions } from 'playwright';
 
 // Helper to open product page and collect flavour names
 async function collectFlavours(url: string, page: Page): Promise<string[]> {
@@ -39,8 +39,9 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
   const baseUrl = 'https://www.nzprotein.co.nz/category/protein-powders';
   const products: Product[] = [];
   const errors: string[] = [];
-  // Browser for scraping flavours for each product
-  const browser = await chromium.launch({
+
+  // Launch options (re-used when we recycle the browser)
+  const launchOptions: LaunchOptions = {
     headless: true,
     args: [
       '--no-sandbox',
@@ -49,14 +50,19 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
       '--single-process',
       '--disable-gpu',
     ],
-  });
-  const context = await browser.newContext({
+  };
+
+  const contextOptions = {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
     locale: 'en-NZ',
     timezoneId: 'Pacific/Auckland',
-  });
-  const page = await context.newPage();
+  } as const;
+
+  // Browser for scraping flavours for each product
+  let browser = await chromium.launch(launchOptions);
+  let context = await browser.newContext(contextOptions);
+  let page: Page = await context.newPage();
 
   let flavoursChecked = 0;
   let flavoursFound = 0;
@@ -65,11 +71,12 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
 
   // Loading HTML into cheerio
   const $ = cheerio.load(html);
-  // console.log('HTML length:', html.length);
-  // console.log('HTML preview:\n', html.slice(0, 1500));
 
   const $cards = $('.product-wrap'); // cheerio collection of product cards
   console.log(`Product cards found: ${$cards.length}`);
+  const totalCards = $cards.length;
+  let processed = 0;
+
   if ($cards.length === 0) {
     await browser.close();
     return { products, errors };
@@ -83,6 +90,8 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
       if (maxRuntime && Date.now() - startTime > maxRuntime) break;
     }
 
+    processed++;
+
     try {
       const $card = $(element); // Make a Cheerio wrapper
       const href = $card.find('a').attr('href');
@@ -91,11 +100,9 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
 
       // Scraped fields
       const scrapedName = $card.find('h3[data-mh="product-title"]').text().trim();
-      // eg:
-      //  <div class="product-price h3"> $42.00 <span>(NZD)</span></div>
+
+      // Price (ignore "(NZD)" span)
       const $priceElement = $card.find('.product-price.h3').first();
-      // Ignore "<span>(NZD)</span>"
-      // Becomes: "$42.00"
       const scrapedPrice = $priceElement
         .contents()
         .filter(function () {
@@ -103,22 +110,18 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
         })
         .text()
         .trim();
+
       if (!scrapedPrice) {
         errors.push(`No price, skipping #${index} url=${productUrl}`);
         continue; // skip this card
       }
+
       // Stock status
       const outOfStock = $card.find('.btn-no-stock').length > 0;
       const inStock = !outOfStock;
 
       // Normalised fields
       const brand = 'NZProtein';
-      // Removes weight info (e.g., "- 1kg", "- 1000 g") and anything that follows it
-      // Examples:
-      //  "Whey Isolate - 1kg"            -> "Whey Isolate"
-      //  "Whey Isolate-1000 g (Vanilla)" -> "Whey Isolate"
-      //  "Casein - 500G"                 -> "Casein"
-      // Captialises the resulting name
       const name = captialisation(scrapedName.replace(/\s*-\s*\d+\s*(g|kg).*/i, '').trim());
 
       // Use the collectFlavours browser to get the list of flavours
@@ -134,7 +137,7 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
       if (flavours.size > 0) flavoursFound++;
 
       const weight_g = weightGrams(scrapedName);
-      // Pick the last price if it's a range like "$34.00 - $40.00" for no discount
+
       const priceRange = (
         scrapedPrice.match(/(?:NZ\$|\$)\s*\d[\d,]*(?:\.\d{1,2})?/g) ?? [scrapedPrice]
       ).pop()!;
@@ -142,7 +145,7 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
       const price = normalisePrice(priceRange);
 
       const product: Product = {
-        id: `${brand}:${name}:${weight_g ?? 'na'}`.toLowerCase().replace(/\s+/g, '_'), // nzprotein:whey_isolate:1000
+        id: `${brand}:${name}:${weight_g ?? 'na'}`.toLowerCase().replace(/\s+/g, '_'),
         brand,
         name,
         price,
@@ -150,13 +153,30 @@ export const scrapeNZProteinProtein = async (): Promise<ScrapeResult> => {
         url: productUrl,
         scrapedAt: new Date().toISOString(),
         retailer: 'NZProtein',
-        // include only when defined
         ...(weight_g !== undefined ? { weight_grams: weight_g } : {}),
         ...(flavours.size ? { flavours: [...flavours] } : {}),
       };
       products.push(product);
     } catch (e: any) {
       errors.push(e?.message ?? String(e));
+    }
+
+    // Recycle browser every 40 products to keep memory under control
+    if (processed > 0 && processed % 40 === 0 && processed < totalCards) {
+      console.log(
+        `NZProtein: processed ${processed}/${totalCards}, recycling browser to free memory`
+      );
+      try {
+        await page.close().catch(() => {});
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+      } catch {
+        // ignore cleanup errors
+      }
+
+      browser = await chromium.launch(launchOptions);
+      context = await browser.newContext(contextOptions);
+      page = await context.newPage();
     }
   }
 

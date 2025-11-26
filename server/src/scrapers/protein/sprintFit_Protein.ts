@@ -2,7 +2,7 @@ import { fetchHtml } from '../common/fetch.js';
 import { captialisation, normalisePrice, weightGrams } from '../common/normalise.js';
 import type { Product, ScrapeResult } from '../common/types.js';
 import * as cheerio from 'cheerio';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page, type LaunchOptions } from 'playwright';
 
 // Helper to open product page and collect flavour names
 async function collectFlavours(url: string, page: Page): Promise<string[]> {
@@ -40,9 +40,9 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
     'https://www.sprintfit.co.nz/products/category/321/protein-powder?pgNmbr=9&pgSize=999999999';
   const products: Product[] = [];
   const errors: string[] = [];
-  // Browser for scraping flavours for each product
+
   // Launch options (re-used when we recycle the browser)
-  const launchOptions = {
+  const launchOptions: LaunchOptions = {
     headless: true,
     args: [
       '--no-sandbox',
@@ -58,7 +58,7 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
     locale: 'en-NZ',
     timezoneId: 'Pacific/Auckland',
-  };
+  } as const;
 
   // Browser for scraping flavours for each product
   let browser = await chromium.launch(launchOptions);
@@ -72,13 +72,12 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
 
   // Loading HTML into cheerio
   const $ = cheerio.load(html);
-  // console.log('HTML length:', html.length);
-  // console.log('HTML preview:\n', html.slice(0, 1500));
 
   const $cards = $('.product'); // cheerio collection of product cards
   console.log(`Product cards found: ${$cards.length}`);
   const totalCards = $cards.length;
   let processed = 0;
+
   if ($cards.length === 0) {
     await browser.close();
     return { products, errors };
@@ -101,51 +100,26 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
       const productUrl = new URL(href, baseUrl).toString(); // Find the product page from card
 
       // Scraped fields
-      // eg:
-      //  <div class="name">
-      //     OPTIMUM NUTRITION<br>
-      //     <strong>
-      //         GOLD STANDARD 100% WHEY<br>
-      //         1LB
-      //     </strong>
-      //  </div>
       const scrapedName = $card.find('.name').first().html() ?? '';
 
-      // Turn "<br>"s into "\n", drop <strong> tags, then split
-      // eg:
-      //  OPTIMUM NUTRITION (lines [0])
-      //  GOLD STANDARD 100% WHEY (lines [1])
-      //  1LB (lines[2])
       const lines = scrapedName
-        .replace(/<br\s*\/?>/gi, '\n') // <br> into \n
-        .replace(/<\/?strong[^>]*>/gi, '') // Remove <strong> tags
-        .split('\n') // Split by lines
-        .map((s) => s.replace(/\s+/g, ' ').trim()) // Collapses gaps
-        .filter(Boolean); // Filter out empty lines
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/?strong[^>]*>/gi, '')
+        .split('\n')
+        .map((s) => s.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
 
-      const $priceElement = $card.find('.price-area').find('.price').first(); // eg (on special):
-      //  <div class="price-area">
-      //     <span class="price special">
-      //         <span class="line-through">$59.95</span>
-      //         $50.96
-      //     </span>
-      //  </div>
-      //
-      // eg (not on special):
-      //  <div class="price-area">
-      //     <span class="price "> $179.00 </span>
-      //  </div>
+      const $priceElement = $card.find('.price-area').find('.price').first();
       const scrapedPrice = $priceElement.hasClass('special')
-        ? // Sale: take only the text (exclude <span class="line-through">)
-          $priceElement
+        ? $priceElement
             .contents()
             .filter(function () {
               return this.type === 'text';
             })
             .text()
             .trim()
-        : // No sale: just take the text
-          $priceElement.text().trim();
+        : $priceElement.text().trim();
+
       if (!scrapedPrice) {
         errors.push(`No price, skipping #${index} url=${productUrl}`);
         continue; // skip this card
@@ -156,12 +130,6 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
 
       // Normalised fields
       const brand = lines[0] || '';
-      // Removes weight info (e.g., "- 1kg", "- 1000 g") and anything that follows it
-      // Examples:
-      //  "Whey Isolate - 1kg"            -> "Whey Isolate"
-      //  "Whey Isolate-1000 g (Vanilla)" -> "Whey Isolate"
-      //  "Casein - 500G"                 -> "Casein"
-      // Captialises the resulting name
       const name = captialisation((lines[1] || '').replace(/\s*-\s*\d+\s*(g|kg).*/i, '').trim());
 
       // Use the collectFlavours browser to get the list of flavours
@@ -178,7 +146,6 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
 
       const weight_g = weightGrams(scrapedName);
 
-      // Pick the last price if it's a range like "$34.00 - $40.00" for no discount
       const priceRange = (
         scrapedPrice.match(/(?:NZ\$|\$)\s*\d[\d,]*(?:\.\d{1,2})?/g) ?? [scrapedPrice]
       ).pop()!;
@@ -186,7 +153,7 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
       const price = normalisePrice(priceRange);
 
       const product: Product = {
-        id: `${brand}:${name}:${weight_g ?? 'na'}`.toLowerCase().replace(/\s+/g, '_'), // nzprotein:whey_isolate:1000
+        id: `${brand}:${name}:${weight_g ?? 'na'}`.toLowerCase().replace(/\s+/g, '_'),
         brand,
         name,
         price,
@@ -194,7 +161,6 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
         url: productUrl,
         scrapedAt: new Date().toISOString(),
         retailer: 'SprintFit',
-        // include only when defined
         ...(weight_g !== undefined ? { weight_grams: weight_g } : {}),
         ...(flavours.size ? { flavours: [...flavours] } : {}),
       };
@@ -204,7 +170,7 @@ export const scrapeSprintFitProtein = async (): Promise<ScrapeResult> => {
     }
 
     // Recycle browser every 40 products to keep memory under control
-    if (processed > 0 && processed % 40 === 0) {
+    if (processed > 0 && processed % 40 === 0 && processed < totalCards) {
       console.log(
         `SprintFit: processed ${processed}/${totalCards}, recycling browser to free memory`
       );

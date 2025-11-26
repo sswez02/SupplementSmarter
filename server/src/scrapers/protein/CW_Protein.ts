@@ -1,4 +1,3 @@
-// src/scrapers/chemistWarehouse.ts
 import { fetchHtml } from '../common/fetch.js';
 import { captialisation, normalisePrice, weightGrams } from '../common/normalise.js';
 import type { Product, ScrapeResult } from '../common/types.js';
@@ -154,7 +153,6 @@ export const scrapeChemistWarehouseProtein = async (): Promise<ScrapeResult> => 
       await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     }
 
-    // console.log('Chemist Warehouse knownBrands:', knownBrands);
     await page.waitForSelector('a.product__container', { timeout: 15000 }).catch(() => {});
 
     const maxPages = 50;
@@ -207,26 +205,17 @@ export const scrapeChemistWarehouseProtein = async (): Promise<ScrapeResult> => 
           newOnThisPage++;
 
           // Scraped fields
-          // Name: from .product__title
           const scrapedName = $card.find('.product__title').first().text().trim();
           if (!scrapedName) {
             errors.push(`No name, skipping #${index} url=${productUrl}`);
             continue;
           }
 
-          // Price:
-          //   <div class="product__price">
-          //     <span class="product__price-current">$95.99</span>
-          //     <em class="product__price-discount">Why Pay $173.90?</em>
-          //   </div>
-          //
-          // Also on the <a> tag: data-analytics-price="95.99"
           const $priceElement = $card.find('.product__price-current').first();
           const textPrice = $priceElement.text().trim();
           const attrPrice = $card.attr('data-analytics-price');
 
           const scrapedPrice = textPrice || (attrPrice ? `$${attrPrice}` : '');
-
           if (!scrapedPrice) {
             errors.push(`No price, skipping #${index} url=${productUrl}`);
             continue; // skip this card
@@ -238,16 +227,13 @@ export const scrapeChemistWarehouseProtein = async (): Promise<ScrapeResult> => 
           const inStock = hasBuyButton && !outOfStockText;
 
           // Normalised fields
-          // Search for brand in name using known brands list
           const { brand: detectedBrand } = splitBrandFromName(scrapedName, knownBrands);
           const brand = detectedBrand ?? 'Chemist Warehouse';
 
-          // Remove weight info (e.g., "- 1kg", "- 1000 g") and anything that follows it
           const name = captialisation(scrapedName.replace(/\s*-\s*\d+\s*(g|kg).*/i, '').trim());
 
           const weight_g = weightGrams(scrapedName);
 
-          // Pick the last price if it's a range like "$34.00 - $40.00"
           const priceRange = (
             scrapedPrice.match(/(?:NZ\$|\$)\s*\d[\d,]*(?:\.\d{1,2})?/g) ?? [scrapedPrice]
           ).pop()!;
@@ -263,9 +249,7 @@ export const scrapeChemistWarehouseProtein = async (): Promise<ScrapeResult> => 
             url: productUrl,
             scrapedAt: new Date().toISOString(),
             retailer: 'Chemist Warehouse',
-            // For now we just mark flavours as "to be processed"
             flavours: ['to be processed'],
-            // include only when defined
             ...(weight_g !== undefined ? { weight_grams: weight_g } : {}),
           };
 
@@ -287,14 +271,10 @@ export const scrapeChemistWarehouseProtein = async (): Promise<ScrapeResult> => 
       });
 
       if (!hasNext) {
-        // No more pages
         break;
       }
 
-      // Click the Next page button to load the next set of results
       await page.click('button.pager__button--next');
-
-      // Give time for the JS pager to fetch and render the next page
       await page.waitForTimeout(2500);
     }
   } catch (e: any) {
