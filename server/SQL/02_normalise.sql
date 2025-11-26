@@ -96,7 +96,8 @@ SELECT
     -1
   ELSE
     1
-  END, 0) AS price_add
+  END, 0) AS price_add,
+  sis.retailer -- Add retailer column from scraped_in_stock
 FROM
   scraped_in_stock sis
   CROSS JOIN LATERAL unnest(sis.flavours_scraped) AS s_flavours_flags(flavour_scraped);
