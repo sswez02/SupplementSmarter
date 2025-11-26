@@ -307,7 +307,6 @@ WITH raw AS (
       AND pc.product_normalised = lower(btrim(unaccent(nc.name_cleaned)))
   WHERE
     pc.product_id IS NOT NULL
-    AND sis.retailer <> 'Chemist Warehouse'
 ),
 cheapest AS (
   -- Step 2: keep only the cheapest row per (product × size × currency × retailer)

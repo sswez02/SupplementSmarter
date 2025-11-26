@@ -129,7 +129,6 @@ raw AS (
     LEFT JOIN flavours_collection fc ON fc.flavour_id = fa.flavour_id
   WHERE
     pc.product_id IS NOT NULL
-    AND sis.retailer <> 'Chemist Warehouse'
 ),
 cheapest AS (
   -- Step 2: keep only the cheapest row per (product × flavour × approx size × currency × retailer)
