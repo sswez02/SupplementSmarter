@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { pool } from './db/index.js';
+import { pool } from './db/index.ts';
 
 // Express app
 // ├─ global middleware
