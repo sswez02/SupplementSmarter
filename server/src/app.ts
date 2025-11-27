@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import { pool } from './db/index.ts';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 // Express app
 // ├─ global middleware
