@@ -74,6 +74,7 @@ $$;
 -- Parse scraped flavour strings and expands into rows to extract out of stock flags and price adjustments
 -- e.g. "Chocolate +$2.00" -> amount_cents =+ 2.00
 -- e.g. "Vanilla (Out of Stock) -> in_stock = FALSE
+--
 -- Input: flavours_scraped = ARRAY['Chocolate +$2.00', 'Vanilla (Out of Stock)', 'Strawberry']
 --
 -- Output:
