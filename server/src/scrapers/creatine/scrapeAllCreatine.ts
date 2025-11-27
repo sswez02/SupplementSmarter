@@ -2,7 +2,6 @@ import { scrapeNoWheyCreatine } from './noWhey_Creatine.js';
 import { scrapeNZProteinCreatine } from './nzProtein_Creatine.js';
 import { scrapeSprintFitCreatine } from './sprintFit_Creatine.js';
 import { scrapeXplosivCreatine } from './xplosiv_Creatine.js';
-import { scrapeChemistWarehouseCreatine } from './CW_Creatine.js';
 import { saveProducts } from '../common/save.js';
 
 // Results from one scraper run only
@@ -13,7 +12,6 @@ const SCRAPERS = {
   xplosiv: scrapeXplosivCreatine,
   sprintfit: scrapeSprintFitCreatine,
   nowhey: scrapeNoWheyCreatine,
-  chemistwarehouse: scrapeChemistWarehouseCreatine,
 } as const satisfies Record<string, ResultsOne>;
 
 (async () => {

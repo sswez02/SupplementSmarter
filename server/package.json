@@ -8,7 +8,6 @@
     "scrape:xplosiv": "tsx src/scrapers/protein/xplosiv_Protein.ts",
     "scrape:sprintfit": "tsx src/scrapers/protein/sprintFit_Protein.ts",
     "scrape:nowhey": "tsx src/scrapers/protein/noWhey_Protein.ts",
-    "scrape:chemistwarehouse": "tsx src/scrapers/common/scrape.ts chemistwarehouse",
     "scrape:sportsfuel": "tsx src/scrapers/protein/scrape.ts sportsfuel",
     "scrape:all": "tsx src/scrapers/protein/scrapeAllProtein.ts",
     "scrape:test": "cross-env SCRAPE_TESTING=1 MAX_MS=60000 tsx src/scrapers/protein/scrapeAllProtein.ts",
