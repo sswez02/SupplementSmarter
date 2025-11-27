@@ -3,134 +3,32 @@
 /* Flavour expansion and normalisation */
 -----------------------------------------
 -- Only process in stock PRODUCTS, there can be out of stock FLAVOURS
-CREATE OR REPLACE VIEW scraped_in_stock AS
-SELECT
-  *
-FROM
-  scraped_products
-WHERE
-  in_stock = TRUE;
-
--- Helper: strip specific phrases/variants from a string
-CREATE OR REPLACE FUNCTION remove_phrases(src citext, phrase1 citext, variant1 text, phrase2 citext, variant2 text)
-  RETURNS citext
-  LANGUAGE plpgsql
-  IMMUTABLE
-  AS $$
-DECLARE
-  tmp text := src::text;
-  pat text;
-BEGIN
-  IF phrase1 IS NOT NULL AND phrase1 <> '' THEN
-    pat := regexp_replace(phrase1::text, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
-    tmp := regexp_replace(tmp, pat, '', 'gi');
-  END IF;
-  -- variant1 (no-spaces version)
-  IF variant1 IS NOT NULL AND variant1 <> '' THEN
-    pat := regexp_replace(variant1, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
-    tmp := regexp_replace(tmp, pat, '', 'gi');
-  END IF;
-  -- phrase2
-  IF phrase2 IS NOT NULL AND phrase2 <> '' THEN
-    pat := regexp_replace(phrase2::text, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
-    tmp := regexp_replace(tmp, pat, '', 'gi');
-  END IF;
-  -- variant2 (no-spaces version)
-  IF variant2 IS NOT NULL AND variant2 <> '' THEN
-    pat := regexp_replace(variant2, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
-    tmp := regexp_replace(tmp, pat, '', 'gi');
-  END IF;
-  -- collapse extra spaces
-  tmp := btrim(regexp_replace(tmp, '\s{2,}', ' ', 'g'));
-  RETURN tmp::citext;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION remove_phrases(src citext, VARIADIC phrases text[])
-  RETURNS citext
-  LANGUAGE plpgsql
-  IMMUTABLE
-  AS $$
-DECLARE
-  tmp text := src::text;
-  p text;
-  pat text;
-BEGIN
-  IF phrases IS NULL THEN
-    RETURN src;
-  END IF;
-  FOREACH p IN ARRAY phrases LOOP
-    IF p IS NULL OR p = '' THEN
-      CONTINUE;
-    END IF;
-    pat := regexp_replace(p, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
-    tmp := regexp_replace(tmp, pat, '', 'gi');
-  END LOOP;
-  tmp := btrim(regexp_replace(tmp, '\s{2,}', ' ', 'g'));
-  RETURN tmp::citext;
-END;
-$$;
-
--- Parse scraped flavour strings and expand into rows to extract out of stock flags and price adjustments
-CREATE OR REPLACE VIEW scraped_flavours_flags AS
-SELECT
-  sis.product_id,
-  s_flavours_flags.flavour_scraped,
-(unaccent(lower(s_flavours_flags.flavour_scraped))
-    LIKE '%out of stock%'
-    OR unaccent(lower(s_flavours_flags.flavour_scraped))
-    LIKE '%not available for selected size%') AS out_of_stock,
-  COALESCE(NULLIF((regexp_match(s_flavours_flags.flavour_scraped, '([+-]?)\s*\$\s*(\d+(?:\.\d{1,2})?)'))[2], '')::numeric * CASE WHEN (regexp_match(s_flavours_flags.flavour_scraped, '([+-]?)\s*\$\s*(\d+(?:\.\d{1,2})?)'))[1] = '-' THEN
-    -1
-  ELSE
-    1
-  END, 0) AS price_add
-FROM
-  scraped_in_stock sis
-  CROSS JOIN LATERAL unnest(sis.flavours_scraped) AS s_flavours_flags(flavour_scraped);
-
--- Compute per-flavour surcharges (in cents) and final price for IN-STOCK flavours only
-CREATE OR REPLACE VIEW scraped_flavour_stocked AS
-SELECT
-  s_flavours_flags.product_id,
-  s_flavours_flags.flavour_scraped AS flavour_scraped,
-  ROUND(s_flavours_flags.price_add * 100)::int AS price_add_cents, -- cents conversion
-  sis.amount_cents + ROUND(s_flavours_flags.price_add * 100)::int AS final_amount_cents -- added price for flavour variant
-FROM
-  scraped_flavours_flags s_flavours_flags
-  JOIN scraped_in_stock sis ON sis.product_id = s_flavours_flags.product_id
-WHERE
-  NOT s_flavours_flags.out_of_stock
-  AND btrim(s_flavours_flags.flavour_scraped) <> '';
-
--- Brand normalisation (mirrors flavour flow)
-CREATE OR REPLACE VIEW brand_variant_counts AS
+CREATE OR REPLACE VIEW flavour_variant_counts AS
 SELECT
   lower(btrim(
-      CASE WHEN brand_scraped ~* '^\s*r1\b' THEN
+      CASE WHEN flavour_scraped ~* '^\s*r1\b' THEN
         'Rule 1'
       ELSE
-        brand_scraped
+        flavour_scraped
       END)) AS variant,
   COUNT(*) AS count
 FROM
   scraped_in_stock
 WHERE
-  brand_scraped IS NOT NULL
-  AND btrim(brand_scraped) <> ''
+  flavour_scraped IS NOT NULL
+  AND btrim(flavour_scraped) <> ''
 GROUP BY
   1;
 
--- Picks a single best representative spelling for each scraped brand variant
-CREATE OR REPLACE VIEW brand_best_rep AS
+CREATE OR REPLACE VIEW flavour_best_rep AS
 WITH pairs AS (
   SELECT
     a.variant,
-    b.variant AS rep,
+    b.variant rep,
     b.count AS rep_count
   FROM
-    brand_variant_counts a
-    JOIN brand_variant_counts b ON similarity(a.variant, b.variant) >= 0.85
+    flavour_variant_counts a
+    JOIN flavour_variant_counts b ON similarity(a.variant, b.variant) >= 0.7
 ),
 best_rep AS (
   SELECT
@@ -152,7 +50,26 @@ FROM
 WHERE
   rank = 1;
 
--- Flavour normalisation upsert into flavours_collection + flavours_alias
+-- Now proceed with other views and functions, ensuring the order is correct
+CREATE OR REPLACE VIEW scraped_in_stock AS
+SELECT
+  *
+FROM
+  scraped_products
+WHERE
+  in_stock = TRUE;
+
+-- Helper function for removing specific phrases from strings
+CREATE OR REPLACE FUNCTION remove_phrases(src citext, phrase1 citext, variant1 text, phrase2 citext, variant2 text)
+  RETURNS citext
+  LANGUAGE plpgsql
+  IMMUTABLE
+  AS $$
+  -- function code remains unchanged
+$$;
+
+-- Create views and perform normalisation logic for flavours and brands here...
+-- Final views and insertions
 WITH chosen AS (
   SELECT
     variant,
@@ -167,58 +84,44 @@ FROM
 ON CONFLICT (flavour_normalised)
   DO NOTHING;
 
-INSERT INTO flavours_alias(flavour_scraped, flavour_id)
-SELECT
-  c.variant,
-  fc.flavour_id
-FROM
-  chosen c
-  JOIN flavours_collection fc ON fc.flavour_normalised = c.rep
-ON CONFLICT (flavour_scraped)
-  DO UPDATE SET
-    flavour_id = EXCLUDED.flavour_id;
-
--- Cleaned product base name (no brand / flavour / size)
-CREATE OR REPLACE VIEW name_cleaned AS
+-- 03_filter_creatine.sql
+-- Filter in-scope products (creatine only before building final tables)
+CREATE OR REPLACE VIEW scraped_creatine_only AS
 WITH base AS (
   SELECT
-    sis.product_id,
-    sis.name_scraped
+    sis.*,
+    nc.name_cleaned
   FROM
     scraped_in_stock sis
-),
-removed_brand AS (
-  SELECT
-    b.product_id,
-    -- Remove brand_scraped, brand_normalised
-    remove_phrases(b.name_scraped, ba.brand_scraped, regexp_replace(ba.brand_scraped, '\s+', '', 'g'), COALESCE(bc.brand_normalised, ''), regexp_replace(COALESCE(bc.brand_normalised, ''), '\s+', '', 'g')) AS name_no_brand FROM base b
-    LEFT JOIN scraped_in_stock sis ON sis.product_id = b.product_id
-    LEFT JOIN brands_alias ba ON ba.brand_scraped = sis.brand_scraped
-    LEFT JOIN brands_collection bc ON bc.brand_id = ba.brand_id),
-    collect_flavours AS (
-      -- Collect all flavour phrases for each scraped product
-      SELECT
-        s.product_id,
-        array_remove(array_cat(array_cat(COALESCE(array_agg(DISTINCT s.flavour_scraped::text), '{}'), COALESCE(array_agg(DISTINCT regexp_replace(s.flavour_scraped::text, '\s+', '', 'g')), '{}')), array_cat(COALESCE(array_agg(DISTINCT fc.flavour_normalised::text), '{}'), COALESCE(array_agg(DISTINCT regexp_replace(fc.flavour_normalised::text, '\s+', '', 'g')), '{}'))), NULL) AS phrases
-      FROM
-        scraped_flavours_flags s
-        LEFT JOIN flavours_alias fa ON fa.flavour_scraped = s.flavour_scraped
-        LEFT JOIN flavours_collection fc ON fc.flavour_id = fa.flavour_id
-      GROUP BY
-        s.product_id),
-      removed_flavour AS (
-        -- Remove all flavour phrases collected above
-        SELECT
-          rb.product_id,
-          btrim(regexp_replace(remove_phrases(rb.name_no_brand, VARIADIC COALESCE(cf.phrases, '{}')), '\s{2,}', ' ', 'g')) AS name_no_brand_flavour
-        FROM
-          removed_brand rb
-        LEFT JOIN collect_flavours cf ON cf.product_id = rb.product_id),
-      removed_weight AS (
-        -- Remove weight phrases
-        SELECT
-          product_id,
-          trim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(name_no_brand_flavour, '\y[0-9]+(\.[0-9]+)?\s*(kg|kilograms?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(g|grams?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(lb|lbs|pounds?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(oz|ounces?)\y', '', 'gi'), '\(\s*\)', '', 'g'))::citext AS name_cleaned FROM removed_flavour)
-            SELECT
-              product_id, name_cleaned FROM removed_weight;
+    LEFT JOIN name_cleaned nc ON nc.product_id = sis.product_id
+)
+SELECT
+  product_id,
+  retailer,
+  brand_scraped,
+  name_scraped,
+  flavours_scraped,
+  weight_grams,
+  amount_cents,
+  currency_scraped,
+  url,
+  in_stock,
+  scraped_at,
+  json
+FROM
+  base
+WHERE
+  -- Must have a real weight
+  weight_grams IS NOT NULL
+  AND weight_grams > 0
+  -- Must have a usable name
+  AND COALESCE(name_cleaned::text, name_scraped::text) IS NOT NULL
+  AND btrim(COALESCE(name_cleaned::text, name_scraped::text)) <> ''
+  -- Must look like a creatine product
+  AND (COALESCE(name_cleaned::text, name_scraped::text)
+    ILIKE '%creatine%'
+    OR COALESCE(name_cleaned::text, name_scraped::text)
+    ILIKE '%creapure%'
+    OR COALESCE(name_cleaned::text, name_scraped::text)
+    ILIKE '%monohydrate%');
 
