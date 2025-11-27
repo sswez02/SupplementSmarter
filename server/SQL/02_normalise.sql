@@ -74,7 +74,6 @@ $$;
 -- Parse scraped flavour strings and expands into rows to extract out of stock flags and price adjustments
 -- e.g. "Chocolate +$2.00" -> amount_cents =+ 2.00
 -- e.g. "Vanilla (Out of Stock) -> in_stock = FALSE
---
 -- Input: flavours_scraped = ARRAY['Chocolate +$2.00', 'Vanilla (Out of Stock)', 'Strawberry']
 --
 -- Output:
@@ -165,8 +164,7 @@ FROM
 WHERE
   rank = 1;
 
-
-/* Brand normalisation (mirrors flavour flow) */
+-- Brand normalisation (mirrors flavour flow)
 ------------------------------------------------
 CREATE OR REPLACE VIEW brand_variant_counts AS
 SELECT
@@ -253,7 +251,24 @@ ON CONFLICT (flavour_scraped)
   DO UPDATE SET
     flavour_id = EXCLUDED.flavour_id;
 
--- Only process those without flavours
+-- Chemist Warehouse: derive flavours from product name when placeholder is used
+-- This runs after flavours_collection has been populated
+UPDATE
+  scraped_products sp
+SET
+  flavours_scraped = COALESCE((
+    SELECT
+      array_agg(fc.flavour_normalised::citext ORDER BY fc.flavour_normalised)
+    FROM flavours_collection fc
+    WHERE
+      -- Match flavour as a whole word/phrase
+      regexp_replace(unaccent(lower(sp.name_scraped)), '[^a-z0-9]+', ' ', 'g') ~('(^|\\s)' || regexp_replace(unaccent(lower(fc.flavour_normalised)), '[^a-z0-9]+', ' ', 'g') || '(\\s|$)')),
+    -- if no flavour found, fall back to empty array instead of 'to be processed'
+    '{}'::citext[])
+WHERE
+  sp.retailer = 'Chemist Warehouse'
+  AND sp.flavours_scraped = ARRAY['to be processed']::citext[];
+
 -- Brand normalisation upsert into brands_collection + brands_alias
 INSERT INTO brands_collection(brand_normalised)
 SELECT DISTINCT
@@ -315,120 +330,8 @@ removed_brand AS (
         -- Remove weight phrases like '2.27kg / 5 lb / 910 g / 16 oz'
         SELECT
           product_id,
-          trim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(name_no_brand_flavour, '\y[0-9]+(\.[0-9]+)?\s*(kg|kilograms?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(g|grams?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(lb|lbs|pounds?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(oz|ounces?)\y', '', 'gi'), '\(\s*\)', '', 'g'))::citext AS name_cleaned FROM removed_flavour
-)
-          SELECT
-            product_id,
-            name_cleaned
-          FROM
-            removed_weight;
+          trim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(name_no_brand_flavour, '\y[0-9]+(\.[0-9]+)?\s*(kg|kilograms?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(g|grams?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(lb|lbs|pounds?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(oz|ounces?)\y', '', 'gi'), '\(\s*\)', '', 'g'))::citext AS name_cleaned FROM removed_flavour)
+            SELECT
+              product_id, name_cleaned FROM removed_weight;
 
-
-/* Product name normalisation (per brand) */
---------------------------------------------------------------
-CREATE OR REPLACE VIEW product_variant_counts AS
-SELECT
-  bc.brand_id,
-  bc.brand_normalised,
-  lower(btrim(unaccent(pn.name_cleaned))) AS variant,
-  COUNT(*) AS count
-FROM
-  name_cleaned pn
-  JOIN scraped_in_stock sis ON sis.product_id = pn.product_id
-  LEFT JOIN brands_alias ba ON ba.brand_scraped = sis.brand_scraped
-  LEFT JOIN brands_collection bc ON bc.brand_id = ba.brand_id
-WHERE
-  bc.brand_id IS NOT NULL
-  AND pn.name_cleaned IS NOT NULL
-  AND btrim(pn.name_cleaned) <> ''
-GROUP BY
-  bc.brand_id,
-  bc.brand_normalised,
-  lower(btrim(unaccent(pn.name_cleaned)));
-
--- Top 50 variants by count
-SELECT
-  *
-FROM
-  product_variant_counts
-ORDER BY
-  count DESC,
-  brand_normalised,
-  variant
-LIMIT 50;
-
-
-/* Product best representative (per brand) */
----------------------------------------------
-CREATE OR REPLACE VIEW product_best_rep AS
-WITH pairs AS (
-  SELECT
-    a.brand_id,
-    a.brand_normalised,
-    a.variant,
-    b.variant AS rep,
-    b.count AS rep_count
-  FROM
-    product_variant_counts a
-    JOIN product_variant_counts b ON a.brand_id = b.brand_id
-      AND similarity(a.variant, b.variant) >= 0.7
-),
-best_rep AS (
-  SELECT
-    brand_id,
-    brand_normalised,
-    variant,
-    rep,
-    rep_count,
-    ROW_NUMBER() OVER (PARTITION BY brand_id,
-      variant ORDER BY rep_count DESC,
-      length(rep) ASC,
-      rep ASC) AS rank
-  FROM
-    pairs
-)
-SELECT
-  brand_id,
-  brand_normalised,
-  variant,
-  rep,
-  rep_count
-FROM
-  best_rep
-WHERE
-  rank = 1;
-
--- Use product_best_rep view (assumed defined) to upsert into products_collection + product_alias
-WITH chosen AS (
-  SELECT
-    brand_id,
-    variant,
-    rep
-  FROM
-    product_best_rep
-),
-upsert_pc AS (
-INSERT INTO products_collection(brand_id, product_normalised)
-  SELECT DISTINCT
-    brand_id,
-    rep
-  FROM
-    chosen
-  ON CONFLICT (brand_id,
-    product_normalised)
-    DO NOTHING);
-
-INSERT INTO product_alias(brand_id, name_normalised, name_id)
-SELECT
-  c.brand_id,
-  c.variant,
-  pc.product_id
-FROM
-  chosen c
-  JOIN products_collection pc ON pc.brand_id = c.brand_id
-    AND pc.product_normalised = c.rep
-  ON CONFLICT (brand_id,
-    name_normalised)
-    DO UPDATE SET
-      name_id = EXCLUDED.name_id;
-
+-- Remaining operations...
