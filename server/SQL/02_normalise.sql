@@ -262,14 +262,12 @@ SET
       array_agg(fc.flavour_normalised::citext ORDER BY fc.flavour_normalised)
     FROM flavours_collection fc
     WHERE
-      -- Match flavour as a whole word/phrase
-      regexp_replace(unaccent(lower(sp.name_scraped)), '[^a-z0-9]+', ' ', 'g') ~('(^|\\s)' || regexp_replace(unaccent(lower(fc.flavour_normalised)), '[^a-z0-9]+', ' ', 'g') || '(\\s|$)')),
-    -- if no flavour found, fall back to empty array instead of 'to be processed'
-    '{}'::citext[])
+      regexp_replace(unaccent(lower(sp.name_scraped)), '[^a-z0-9]+', ' ', 'g') ~('(^|\\s)' || regexp_replace(unaccent(lower(fc.flavour_normalised)), '[^a-z0-9]+', ' ', 'g') || '(\\s|$)')), '{}'::citext[]) -- If no match, return empty array
 WHERE
   sp.retailer = 'Chemist Warehouse'
-  AND sp.flavours_scraped = ARRAY['to be processed']::citext[];
+  AND sp.flavours_scraped = '{}'::citext[];
 
+-- Only process those without flavours
 -- Brand normalisation upsert into brands_collection + brands_alias
 INSERT INTO brands_collection(brand_normalised)
 SELECT DISTINCT
@@ -338,6 +336,17 @@ removed_brand AS (
             name_cleaned
           FROM
             removed_weight;
+
+-- Clean product name for normalisation, removing brand/flavour/size
+UPDATE
+  name_cleaned nc
+SET
+  name_cleaned = regexp_replace(nc.name_cleaned, 'flavour|size|variant', '', 'gi') -- Adjust based on actual patterns
+FROM
+  scraped_products sp
+WHERE
+  sp.product_id = nc.product_id
+  AND sp.retailer = 'Chemist Warehouse';
 
 
 /* Product name normalisation (per brand) */
