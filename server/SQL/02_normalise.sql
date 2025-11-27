@@ -251,24 +251,7 @@ ON CONFLICT (flavour_scraped)
   DO UPDATE SET
     flavour_id = EXCLUDED.flavour_id;
 
--- Chemist Warehouse: derive flavours from product name when placeholder is used
--- This runs after flavours_collection has been populated
-UPDATE
-  scraped_products sp
-SET
-  flavours_scraped = COALESCE((
-    SELECT
-      array_agg(fc.flavour_normalised::citext ORDER BY fc.flavour_normalised)
-    FROM flavours_collection fc
-    WHERE
-      -- Match flavour as a whole word/phrase
-      regexp_replace(unaccent(lower(sp.name_scraped)), '[^a-z0-9]+', ' ', 'g') ~('(^|\\s)' || regexp_replace(unaccent(lower(fc.flavour_normalised)), '[^a-z0-9]+', ' ', 'g') || '(\\s|$)')),
-    -- if no flavour found, fall back to empty array instead of 'to be processed'
-    '{}'::citext[])
-WHERE
-  sp.retailer = 'Chemist Warehouse'
-  AND sp.flavours_scraped = ARRAY['to be processed']::citext[];
-
+-- Only process those without flavours
 -- Brand normalisation upsert into brands_collection + brands_alias
 INSERT INTO brands_collection(brand_normalised)
 SELECT DISTINCT
@@ -334,4 +317,3 @@ removed_brand AS (
             SELECT
               product_id, name_cleaned FROM removed_weight;
 
--- Remaining operations...
