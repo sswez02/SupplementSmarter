@@ -339,14 +339,11 @@ removed_brand AS (
 
 -- Clean product name for normalisation, removing brand/flavour/size
 UPDATE
-  name_cleaned nc
-SET
-  name_cleaned = regexp_replace(nc.name_cleaned, 'flavour|size|variant', '', 'gi') -- Adjust based on actual patterns
-FROM
   scraped_products sp
+SET
+  name_scraped = regexp_replace(sp.name_scraped, 'flavour|size|variant', '', 'gi')
 WHERE
-  sp.product_id = nc.product_id
-  AND sp.retailer = 'Chemist Warehouse';
+  sp.retailer = 'Chemist Warehouse';
 
 
 /* Product name normalisation (per brand) */
