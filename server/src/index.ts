@@ -1,4 +1,4 @@
-import { app } from './app.js';
+import { app } from './app.ts';
 
 const PORT = process.env.PORT ?? 4000;
 console.log(`PORT is set to: ${PORT}`);
