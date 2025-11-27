@@ -126,7 +126,7 @@ filtered AS (
         ILIKE '%biscuit%'))
   SELECT
     product_id,
-    retailer,
+    retailer, -- Added retailer
     brand_scraped,
     name_scraped,
     flavours_scraped,
