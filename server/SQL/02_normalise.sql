@@ -252,21 +252,6 @@ ON CONFLICT (flavour_scraped)
   DO UPDATE SET
     flavour_id = EXCLUDED.flavour_id;
 
--- Chemist Warehouse: derive flavours from product name when placeholder is used
--- This runs after flavours_collection has been populated
-UPDATE
-  scraped_products sp
-SET
-  flavours_scraped = COALESCE((
-    SELECT
-      array_agg(fc.flavour_normalised::citext ORDER BY fc.flavour_normalised)
-    FROM flavours_collection fc
-    WHERE
-      regexp_replace(unaccent(lower(sp.name_scraped)), '[^a-z0-9]+', ' ', 'g') ~('(^|\\s)' || regexp_replace(unaccent(lower(fc.flavour_normalised)), '[^a-z0-9]+', ' ', 'g') || '(\\s|$)')), '{}'::citext[]) -- If no match, return empty array
-WHERE
-  sp.retailer = 'Chemist Warehouse'
-  AND sp.flavours_scraped = '{}'::citext[];
-
 -- Only process those without flavours
 -- Brand normalisation upsert into brands_collection + brands_alias
 INSERT INTO brands_collection(brand_normalised)
@@ -336,14 +321,6 @@ removed_brand AS (
             name_cleaned
           FROM
             removed_weight;
-
--- Clean product name for normalisation, removing brand/flavour/size
-UPDATE
-  scraped_products sp
-SET
-  name_scraped = regexp_replace(sp.name_scraped, 'flavour|size|variant', '', 'gi')
-WHERE
-  sp.retailer = 'Chemist Warehouse';
 
 
 /* Product name normalisation (per brand) */
@@ -438,7 +415,8 @@ INSERT INTO products_collection(brand_id, product_normalised)
     chosen
   ON CONFLICT (brand_id,
     product_normalised)
-    DO NOTHING)
+    DO NOTHING);
+
 INSERT INTO product_alias(brand_id, name_normalised, name_id)
 SELECT
   c.brand_id,

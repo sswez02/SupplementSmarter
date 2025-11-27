@@ -130,7 +130,6 @@ raw AS (
     LEFT JOIN flavours_collection fc ON fc.flavour_id = fa.flavour_id
   WHERE
     pc.product_id IS NOT NULL
-    AND sis.retailer <> 'Chemist Warehouse'
 ),
 cheapest AS (
   -- Step 2: keep only the cheapest row per (product × flavour × approx size × currency × retailer)
@@ -250,13 +249,11 @@ insert_offers AS (
     oa.retailer,
     oa.flavours,
     oa.price,
-    oa.currency
-  RETURNING
-    1
+    oa.currency;
+
 ),
 -- Step 4b: insert into products_final, picking a URL for the global lowest price
-INSERT INTO products_final(
-  product_id, brand, name, weight_grams, flavours, price, currency, retailer, url, value_score, slug)
+INSERT INTO products_final(product_id, brand, name, weight_grams, flavours, price, currency, retailer, url, value_score, slug)
 SELECT
   s.product_id,
   s.brand,
