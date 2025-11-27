@@ -71,19 +71,7 @@ BEGIN
 END;
 $$;
 
--- Parse scraped flavour strings and expands into rows to extract out of stock flags and price adjustments
--- e.g. "Chocolate +$2.00" -> amount_cents =+ 2.00
--- e.g. "Vanilla (Out of Stock) -> in_stock = FALSE
--- Input: flavours_scraped = ARRAY['Chocolate +$2.00', 'Vanilla (Out of Stock)', 'Strawberry']
---
--- Output:
--- +------------+------------------------+--------------+-----------+
--- | product_id | flavour_scraped        | out_of_stock | price_add |
--- +------------+------------------------+--------------+-----------+
--- | 10         | Chocolate +$2.00       | false        | 2.00      |
--- | 10         | Vanilla (Out of Stock) | true         | 0.00      |
--- | 10         | Strawberry             | false        | 0.00      |
--- +------------+------------------------+--------------+-----------+
+-- Parse scraped flavour strings and expand into rows to extract out of stock flags and price adjustments
 CREATE OR REPLACE VIEW scraped_flavours_flags AS
 SELECT
   sis.product_id,
@@ -115,57 +103,7 @@ WHERE
   NOT s_flavours_flags.out_of_stock
   AND btrim(s_flavours_flags.flavour_scraped) <> '';
 
--- Produces a list of flavour variants and their usage counts, also applies some rules to clean up the strings
-CREATE OR REPLACE VIEW flavour_variant_counts AS
-SELECT
-  lower(btrim(unaccent(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(flavour_scraped, '\s*\+\s*\$\s*\d+(?:\.\d{1,2})?', '', 'gi'), -- remove " +$37.00" / " +$3.04"
-                '\s*-\s*dated:\s*\d{2}/\d{4}', '', 'gi'), -- remove " - dated: 01/2026"
-              '\s*\(\s*bb\s*\d{2}/\d{2}(?:/\d{2,4})?\s*\)', '', 'gi'), -- remove "(bb 31/01/26)" / "(bb 31/01/2026)"
-            '\s*&\s*', ' and ', 'gi'), -- "&" -> " and "
-          '\mn\M', ' and ', 'gi') -- standalone "n" -> "and"
-))) AS variant,
-  COUNT(*) AS count
-FROM
-  scraped_flavour_stocked
-WHERE
-  flavour_scraped IS NOT NULL
-  AND btrim(flavour_scraped) <> ''
-GROUP BY
-  1;
-
--- Picks a single best representative spelling for each scraped flavour variant from the candidates
-CREATE OR REPLACE VIEW flavour_best_rep AS
-WITH pairs AS (
-  SELECT
-    a.variant,
-    b.variant rep,
-    b.count AS rep_count
-  FROM
-    flavour_variant_counts a
-    JOIN flavour_variant_counts b ON similarity(a.variant, b.variant) >= 0.7
-),
-best_rep AS (
-  SELECT
-    variant,
-    rep,
-    rep_count,
-    ROW_NUMBER() OVER (PARTITION BY variant ORDER BY rep_count DESC,
-      length(rep) ASC,
-      rep ASC) AS rank
-  FROM
-    pairs
-)
-SELECT
-  variant,
-  rep,
-  rep_count
-FROM
-  best_rep
-WHERE
-  rank = 1;
-
 -- Brand normalisation (mirrors flavour flow)
-------------------------------------------------
 CREATE OR REPLACE VIEW brand_variant_counts AS
 SELECT
   lower(btrim(
@@ -183,17 +121,7 @@ WHERE
 GROUP BY
   1;
 
--- Top 50 variants by count
-SELECT
-  *
-FROM
-  brand_variant_counts
-ORDER BY
-  count DESC,
-  variant
-LIMIT 50;
-
--- Picks a single best representative spelling for each scraped brand variant from the candidates
+-- Picks a single best representative spelling for each scraped brand variant
 CREATE OR REPLACE VIEW brand_best_rep AS
 WITH pairs AS (
   SELECT
@@ -230,16 +158,15 @@ WITH chosen AS (
     variant,
     rep
   FROM
-    flavour_best_rep
-),
-upsert_fc AS (
+    flavour_best_rep)
 INSERT INTO flavours_collection(flavour_normalised)
-  SELECT DISTINCT
-    rep
-  FROM
-    chosen
-  ON CONFLICT (flavour_normalised)
-    DO NOTHING)
+SELECT DISTINCT
+  rep
+FROM
+  chosen
+ON CONFLICT (flavour_normalised)
+  DO NOTHING;
+
 INSERT INTO flavours_alias(flavour_scraped, flavour_id)
 SELECT
   c.variant,
@@ -250,27 +177,6 @@ FROM
 ON CONFLICT (flavour_scraped)
   DO UPDATE SET
     flavour_id = EXCLUDED.flavour_id;
-
--- Only process those without flavours
--- Brand normalisation upsert into brands_collection + brands_alias
-INSERT INTO brands_collection(brand_normalised)
-SELECT DISTINCT
-  rep
-FROM
-  brand_best_rep
-ON CONFLICT (brand_normalised)
-  DO NOTHING;
-
-INSERT INTO brands_alias(brand_scraped, brand_id)
-SELECT
-  b.variant AS brand_scraped,
-  bc.brand_id
-FROM
-  brand_best_rep b
-  JOIN brands_collection bc ON bc.brand_normalised = b.rep
-ON CONFLICT (brand_scraped)
-  DO UPDATE SET
-    brand_id = EXCLUDED.brand_id;
 
 -- Cleaned product base name (no brand / flavour / size)
 CREATE OR REPLACE VIEW name_cleaned AS
@@ -284,14 +190,13 @@ WITH base AS (
 removed_brand AS (
   SELECT
     b.product_id,
-    -- Remove brand_scraped, brand_scraped(no spaces), brand_normalised, brand_normalised(no spaces)
+    -- Remove brand_scraped, brand_normalised
     remove_phrases(b.name_scraped, ba.brand_scraped, regexp_replace(ba.brand_scraped, '\s+', '', 'g'), COALESCE(bc.brand_normalised, ''), regexp_replace(COALESCE(bc.brand_normalised, ''), '\s+', '', 'g')) AS name_no_brand FROM base b
     LEFT JOIN scraped_in_stock sis ON sis.product_id = b.product_id
     LEFT JOIN brands_alias ba ON ba.brand_scraped = sis.brand_scraped
     LEFT JOIN brands_collection bc ON bc.brand_id = ba.brand_id),
     collect_flavours AS (
-      -- Collect all flavour phrases for each scraped product:
-      --   scraped, scraped(no spaces), normalised, normalised(no spaces)
+      -- Collect all flavour phrases for each scraped product
       SELECT
         s.product_id,
         array_remove(array_cat(array_cat(COALESCE(array_agg(DISTINCT s.flavour_scraped::text), '{}'), COALESCE(array_agg(DISTINCT regexp_replace(s.flavour_scraped::text, '\s+', '', 'g')), '{}')), array_cat(COALESCE(array_agg(DISTINCT fc.flavour_normalised::text), '{}'), COALESCE(array_agg(DISTINCT regexp_replace(fc.flavour_normalised::text, '\s+', '', 'g')), '{}'))), NULL) AS phrases
@@ -310,7 +215,7 @@ removed_brand AS (
           removed_brand rb
         LEFT JOIN collect_flavours cf ON cf.product_id = rb.product_id),
       removed_weight AS (
-        -- Remove weight phrases like '2.27kg / 5 lb / 910 g / 16 oz'
+        -- Remove weight phrases
         SELECT
           product_id,
           trim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(name_no_brand_flavour, '\y[0-9]+(\.[0-9]+)?\s*(kg|kilograms?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(g|grams?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(lb|lbs|pounds?)\y', '', 'gi'), '\y[0-9]+(\.[0-9]+)?\s*(oz|ounces?)\y', '', 'gi'), '\(\s*\)', '', 'g'))::citext AS name_cleaned FROM removed_flavour)
