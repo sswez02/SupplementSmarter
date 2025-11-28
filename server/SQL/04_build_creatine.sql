@@ -48,6 +48,9 @@
 ------------------------------------------------------------
 -- Helper: slugify "Brand Name 2.27kg" -> "brand-name-2-27kg"
 ------------------------------------------------------------
+------------------------------------------------------------
+-- Helper: slugify "Brand Name 2.27kg" -> "brand-name-2-27kg"
+------------------------------------------------------------
 CREATE OR REPLACE FUNCTION slugify(input text)
   RETURNS text
   LANGUAGE sql
@@ -156,6 +159,7 @@ FROM
 
 ------------------------------------------------------------
 -- Step 2: build creatine_final (one row per canonical product × size)
+--         using creatine_offers (no cheapest CTE here)
 ------------------------------------------------------------
 WITH aggregated AS (
   -- Per (canonical product × size × currency), get the cheapest price
@@ -167,7 +171,7 @@ WITH aggregated AS (
     currency,
     MIN(price) AS min_price
   FROM
-    cheapest
+    creatine_offers
   GROUP BY
     product_id,
     brand,
@@ -215,8 +219,26 @@ SELECT
   s.weight_grams,
   s.min_price AS price,
   s.currency,
-  MIN(c.retailer) AS retailer, -- any retailer with min price
-  MIN(c.url) AS url, -- any URL with min price
+  -- pick any retailer with the min price
+(
+    SELECT
+      MIN(co.retailer)
+    FROM creatine_offers co
+    WHERE
+      co.product_id = s.product_id
+      AND co.weight_grams = s.weight_grams
+      AND co.currency = s.currency
+      AND co.price = s.min_price) AS retailer,
+(
+    SELECT
+      MIN(co.url)
+    FROM
+      creatine_offers co
+    WHERE
+      co.product_id = s.product_id
+      AND co.weight_grams = s.weight_grams
+      AND co.currency = s.currency
+      AND co.price = s.min_price) AS url,
   s.value_score,
   slugify(COALESCE(s.brand::text, '') || ' ' || COALESCE(s.name::text, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
       ''
@@ -224,18 +246,7 @@ SELECT
       trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
     END) AS slug
 FROM
-  scored s
-  JOIN cheapest c ON c.product_id = s.product_id
-    AND c.currency = s.currency
-    AND c.price = s.min_price
-GROUP BY
-  s.product_id,
-  s.brand,
-  s.name,
-  s.weight_grams,
-  s.min_price,
-  s.currency,
-  s.value_score;
+  scored s;
 
 ------------------------------------------------------------
 -- Step 3: snapshot today's prices into history (creatine)
