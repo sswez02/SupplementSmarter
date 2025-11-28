@@ -48,9 +48,6 @@
 ------------------------------------------------------------
 -- Helper: slugify "Brand Name 2.27kg" -> "brand-name-2-27kg"
 ------------------------------------------------------------
-------------------------------------------------------------
--- Helper: slugify "Brand Name 2.27kg" -> "brand-name-2-27kg"
-------------------------------------------------------------
 CREATE OR REPLACE FUNCTION slugify(input text)
   RETURNS text
   LANGUAGE sql
@@ -68,7 +65,7 @@ DROP TABLE IF EXISTS creatine_offers CASCADE;
 DROP TABLE IF EXISTS creatine_final CASCADE;
 
 CREATE TABLE IF NOT EXISTS creatine_offers(
-  product_id bigint NOT NULL, -- canonical from products_collection.product_id
+  product_id bigint NOT NULL, -- canonical id (per brand+name+size+currency)
   brand citext,
   name citext,
   weight_grams integer,
@@ -79,7 +76,7 @@ CREATE TABLE IF NOT EXISTS creatine_offers(
 );
 
 CREATE TABLE IF NOT EXISTS creatine_final(
-  product_id bigint NOT NULL, -- canonical from products_collection.product_id
+  product_id bigint NOT NULL, -- canonical id (per brand+name+size+currency)
   brand citext,
   name citext,
   weight_grams integer,
@@ -96,54 +93,67 @@ TRUNCATE TABLE creatine_offers;
 TRUNCATE TABLE creatine_final;
 
 ------------------------------------------------------------
--- Step 1: map scraped creatine → canonical product_id
---         and build per-retailer offers (creatine_offers)
+-- Step 1: Clean scraped creatine and assign canonical IDs
 ------------------------------------------------------------
-WITH raw AS (
+WITH cleaned AS (
   SELECT
-    pc.product_id AS product_id, -- canonical id
-    initcap(bc.brand_normalised) AS brand,
-    -- Use product_normalised / name_cleaned and strip "dated" phrases before initcap
-    initcap(btrim(regexp_replace(regexp_replace(COALESCE(pc.product_normalised::text, lower(btrim(unaccent(nc.name_cleaned::text)))), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', -- remove " - dated 10/25"
+    sc.product_id, -- scraped id, used only to derive canonical id
+    initcap(unaccent(sc.brand_scraped))::citext AS brand,
+    initcap(btrim(regexp_replace(regexp_replace(lower(unaccent(sc.name_scraped::text)), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', -- remove “dated 10/25”
             '', 'gi'), '\s{2,}', ' ', 'g')))::citext AS name,
-    sis.weight_grams,
-    sis.amount_cents AS price,
-    sis.currency_scraped AS currency,
-    sis.retailer,
-    sis.url,
-    ROW_NUMBER() OVER (PARTITION BY pc.product_id,
-      sis.weight_grams,
-      sis.currency_scraped,
-      sis.retailer ORDER BY sis.amount_cents ASC) AS rn
+    sc.weight_grams,
+    sc.amount_cents AS price,
+    sc.currency_scraped AS currency,
+    sc.retailer,
+    sc.url
   FROM
-    scraped_creatine_only sis
-    JOIN name_cleaned nc ON nc.product_id = sis.product_id
-    LEFT JOIN brands_alias ba ON ba.brand_scraped = sis.brand_scraped
-    LEFT JOIN brands_collection bc ON bc.brand_id = ba.brand_id
-    LEFT JOIN products_collection pc ON pc.brand_id = bc.brand_id
-      AND pc.product_normalised = lower(btrim(unaccent(nc.name_cleaned::text)))
+    scraped_creatine_only sc
   WHERE
-    pc.product_id IS NOT NULL
-    AND sis.weight_grams IS NOT NULL
-    AND sis.weight_grams > 0
-    AND sis.amount_cents IS NOT NULL
-    AND sis.amount_cents > 0
+    sc.weight_grams IS NOT NULL
+    AND sc.weight_grams > 0
+    AND sc.amount_cents IS NOT NULL
+    AND sc.amount_cents > 0
 ),
-cheapest AS (
-  -- One row per (canonical product × size × currency × retailer) with min price
+canonical_ids AS (
+  -- Stable canonical id per (brand, name, size, currency)
   SELECT
-    product_id,
+    MIN(product_id) AS canonical_product_id,
     brand,
     name,
     weight_grams,
-    price,
-    currency,
-    retailer,
-    url
+    currency
   FROM
-    raw
-  WHERE
-    rn = 1)
+    cleaned
+  GROUP BY
+    brand,
+    name,
+    weight_grams,
+    currency
+),
+dedup AS (
+  -- One row per (canonical product × size × currency × retailer) with min price
+  SELECT
+    c.canonical_product_id AS product_id,
+    c.brand,
+    c.name,
+    c.weight_grams,
+    c.currency,
+    cl.retailer,
+    MIN(cl.price) AS price,
+    MIN(cl.url) AS url
+  FROM
+    cleaned cl
+    JOIN canonical_ids c ON c.brand = cl.brand
+      AND c.name = cl.name
+      AND c.weight_grams = cl.weight_grams
+      AND c.currency = cl.currency
+  GROUP BY
+    c.canonical_product_id,
+    c.brand,
+    c.name,
+    c.weight_grams,
+    c.currency,
+    cl.retailer)
 INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, price, currency, url)
 SELECT
   product_id,
@@ -155,11 +165,10 @@ SELECT
   currency,
   url
 FROM
-  cheapest;
+  dedup;
 
 ------------------------------------------------------------
 -- Step 2: build creatine_final (one row per canonical product × size)
---         using creatine_offers (no cheapest CTE here)
 ------------------------------------------------------------
 WITH aggregated AS (
   -- Per (canonical product × size × currency), get the cheapest price
@@ -250,7 +259,6 @@ FROM
 
 ------------------------------------------------------------
 -- Step 3: snapshot today's prices into history (creatine)
---         using canonical product_id
 ------------------------------------------------------------
 INSERT INTO price_history(category, product_id, weight_grams, retailer, price, currency, snapshot_date)
 SELECT
