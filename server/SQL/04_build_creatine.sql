@@ -118,23 +118,20 @@ cleaned AS (
   SELECT
     product_id,
     brand,
-    -- Clean base name (protein-style):
     --  - start from name_raw
-    --  - strip leading brand
-    --  - strip "dated" phrases
-    --  - strip size tokens like "300g", "2kg", "(300g)"
-    --  - collapse repeated spaces
-    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
-                  -- 1) remove leading brand + optional dash/colon, if present
-                  regexp_replace(name_raw, '^\s*' || regexp_replace(lower(brand::text), '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g') || '\s*[-:]?\s*', '', 'i'),
-                  -- 2) remove " - dated 01/2026" / "dated 10/25"
-                  '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'),
-                -- 3) remove "(300g)" / "(0.3kg)" / "(300 grams)"
-                '\(\s*\d+(?:\.\d+)?\s*(kg|g|grams?)\s*\)', '', 'gi'),
-              -- 4) remove bare "300g", "2kg", "300 grams"
-              '\s*\d+(?:\.\d+)?\s*(kg|g|grams?)\b', '', 'gi'),
-            -- 5) collapse multiple spaces
-            '\s{2,}', ' ', 'g'))))::citext AS name,
+    --  - remove "dated" phrases
+    --  - remove size tokens like "300g", "2kg", "(300 grams)"
+    --  - strip leading brand *first word* if it appears at the front
+    --  - collapse duplicate spaces and initcap
+    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(
+              -- 1) remove “ - dated 01/2026” / “dated 10/25”
+              regexp_replace(name_raw, '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'),
+              -- 2) remove "(300g)" / "(0.3kg)" / "(300 grams)"
+              '\(\s*\d+(?:\.\d+)?\s*(kg|g|grams?)\s*\)', '', 'gi'),
+            -- 3) remove bare "300g", "2kg", "300 grams"
+            '\s*\d+(?:\.\d+)?\s*(kg|g|grams?)\b', '', 'gi'),
+          -- 4) remove leading first brand word if present
+          '^\s*' || regexp_replace(split_part(lower(brand::text), ' ', 1), '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g') || '\s+', '', 'i')))::citext AS name,
     weight_grams,
     price,
     currency,
