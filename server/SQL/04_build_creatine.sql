@@ -102,11 +102,13 @@ WITH cleaned AS (
     -- Base product name (no brand, no size):
     --  - lower + unaccent + trim
     --  - strip "dated 10/25" style phrases
-    --  - strip size tokens like "250g", "2kg", "250 g", "2.27 kg"
+    --  - strip size tokens like "250g", "2kg", "250 g", "2.27 kg", "250gm", "250 grams"
     --  - strip leading brand name (e.g. "Athletech", "Muscletech")
     --  - collapse multiple spaces
     --  - initcap at the end
-    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(lower(btrim(unaccent(sc.name_scraped::text))), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'), '\s*\d+(?:\.\d+)?\s*(kg|g)\b', '', 'gi'), '^' || lower(unaccent(sc.brand_scraped::text)) || '\s+', '', 'i')))::citext AS name,
+    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(lower(btrim(unaccent(sc.name_scraped::text))), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'),
+            -- strip sizes + any trailing junk that isn't a word char or %
+            '\s*\d+(?:\.\d+)?\s*(kg|g|gm|grams?)\b[^\w%]*', '', 'gi'), '^' || lower(unaccent(sc.brand_scraped::text)) || '\s+', '', 'i')))::citext AS name,
     sc.weight_grams,
     sc.amount_cents AS price,
     sc.currency_scraped AS currency,
@@ -231,7 +233,7 @@ SELECT
   s.product_id,
   s.brand,
   -- FINAL cosmetic clean: strip any trailing sizes if they somehow survived
-  initcap(btrim(regexp_replace(lower(s.name::text), '\s*\d+(?:\.\d+)?\s*(kg|g)\b', '', 'gi')))::citext AS name,
+  initcap(btrim(regexp_replace(lower(s.name::text), '\s*\d+(?:\.\d+)?\s*(kg|g|gm|grams?)\b[^\w%]*', '', 'gi')))::citext AS name,
   s.weight_grams,
   s.min_price AS price,
   s.currency,
@@ -256,7 +258,8 @@ SELECT
       AND co.currency = s.currency
       AND co.price = s.min_price) AS url,
   s.value_score,
-  slugify(COALESCE(s.brand::text, '') || ' ' || COALESCE(s.name::text, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
+  -- slug based on the same size-free base name
+  slugify(COALESCE(s.brand::text, '') || ' ' || COALESCE(btrim(regexp_replace(lower(s.name::text), '\s*\d+(?:\.\d+)?\s*(kg|g|gm|grams?)\b[^\w%]*', '', 'gi')), '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
       ''
     ELSE
       trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
