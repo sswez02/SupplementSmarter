@@ -65,7 +65,7 @@ DROP TABLE IF EXISTS creatine_offers CASCADE;
 DROP TABLE IF EXISTS creatine_final CASCADE;
 
 CREATE TABLE IF NOT EXISTS creatine_offers(
-  product_id bigint NOT NULL, -- canonical id (per brand+name+size+currency)
+  product_id bigint NOT NULL, -- canonical id (per brand + name + size + currency)
   brand citext,
   name citext,
   weight_grams integer,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS creatine_offers(
 );
 
 CREATE TABLE IF NOT EXISTS creatine_final(
-  product_id bigint NOT NULL, -- canonical id (per brand+name+size+currency)
+  product_id bigint NOT NULL, -- canonical id (per brand + name + size + currency)
   brand citext,
   name citext,
   weight_grams integer,
@@ -94,13 +94,13 @@ TRUNCATE TABLE creatine_final;
 
 ------------------------------------------------------------
 -- Step 1: Clean scraped creatine and assign canonical IDs
+-- (mirror protein idea: brand + base-name + size -> canonical id)
 ------------------------------------------------------------
-WITH cleaned AS (
+WITH raw AS (
   SELECT
-    sc.product_id, -- scraped id, used only to derive canonical id
+    sc.product_id, -- raw scraped id (only used to derive canonical id)
     initcap(unaccent(sc.brand_scraped))::citext AS brand,
-    initcap(btrim(regexp_replace(regexp_replace(lower(unaccent(sc.name_scraped::text)), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', -- remove “dated 10/25”
-            '', 'gi'), '\s{2,}', ' ', 'g')))::citext AS name,
+    lower(unaccent(sc.name_scraped::text)) AS name_raw,
     sc.weight_grams,
     sc.amount_cents AS price,
     sc.currency_scraped AS currency,
@@ -114,8 +114,37 @@ WITH cleaned AS (
     AND sc.amount_cents IS NOT NULL
     AND sc.amount_cents > 0
 ),
+cleaned AS (
+  SELECT
+    product_id,
+    brand,
+    -- Clean base name (protein-style):
+    --  - start from name_raw
+    --  - strip leading brand
+    --  - strip "dated" phrases
+    --  - strip size tokens like "300g", "2kg", "(300g)"
+    --  - collapse repeated spaces
+    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
+                  -- 1) remove leading brand + optional dash/colon, if present
+                  regexp_replace(name_raw, '^\s*' || regexp_replace(lower(brand::text), '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g') || '\s*[-:]?\s*', '', 'i'),
+                  -- 2) remove " - dated 01/2026" / "dated 10/25"
+                  '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'),
+                -- 3) remove "(300g)" / "(0.3kg)" / "(300 grams)"
+                '\(\s*\d+(?:\.\d+)?\s*(kg|g|grams?)\s*\)', '', 'gi'),
+              -- 4) remove bare "300g", "2kg", "300 grams"
+              '\s*\d+(?:\.\d+)?\s*(kg|g|grams?)\b', '', 'gi'),
+            -- 5) collapse multiple spaces
+            '\s{2,}', ' ', 'g'))))::citext AS name,
+    weight_grams,
+    price,
+    currency,
+    retailer,
+    url
+  FROM
+    raw
+),
 canonical_ids AS (
-  -- Stable canonical id per (brand, name, size, currency)
+  -- Stable canonical id per (brand, base name, size, currency)
   SELECT
     MIN(product_id) AS canonical_product_id,
     brand,
@@ -259,6 +288,7 @@ FROM
 
 ------------------------------------------------------------
 -- Step 3: snapshot today's prices into history (creatine)
+-- Uses canonical product_id (like protein)
 ------------------------------------------------------------
 INSERT INTO price_history(category, product_id, weight_grams, retailer, price, currency, snapshot_date)
 SELECT
