@@ -262,8 +262,8 @@ insert_offers AS (
     s.flavours,
     s.min_price AS price,
     s.currency,
-    s.retailer,
-    MIN(c.url) AS url, -- any URL among those with the global min price
+    MIN(c.retailer) AS retailer,
+    MIN(c.url) AS url,
     s.value_score,
     regexp_replace(regexp_replace(lower(unaccent(COALESCE(s.brand, '') || ' ' || COALESCE(s.name, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
               ''
@@ -283,7 +283,6 @@ insert_offers AS (
     s.flavours,
     s.min_price,
     s.currency,
-    s.retailer,
     s.value_score;
 
 -- Step 5: snapshot today's prices into history (protein)
