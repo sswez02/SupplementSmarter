@@ -125,3 +125,17 @@ WHERE
   NOT f.out_of_stock
   AND btrim(f.flavour_scraped) <> '';
 
+-- Base name cleaning
+-- name_cleaned: "base" product name without any fancy normalisation.
+-- Used by scraped_protein_only / scraped_creatine_only and build steps.
+CREATE OR REPLACE VIEW name_cleaned AS
+SELECT
+  sis.product_id,
+  -- Start from the scraped name and normalise it a bit:
+  --  - unaccent (remove accents)
+  --  - trim spaces
+  --  - lower-case
+  lower(btrim(unaccent(sis.name_scraped::text)))::citext AS name_cleaned
+FROM
+  scraped_in_stock sis;
+
