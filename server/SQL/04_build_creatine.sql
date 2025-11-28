@@ -1,73 +1,19 @@
 -- 04_build_creatine.sql
--- Build denormalised comparison tables:
+-- Build denormalised comparison tables for creatine:
 --   1) creatine_offers – all retailers
 --   2) creatine_final  – cheapest overall per product × size
 --
--- Table 1: creatine_offers
--- ------------------------
--- One row per (representative creatine product × size × retailer),
--- deduplicated per retailer.
---
--- Columns:
---  product_id   – representative product id from products_collection.product_id
---  brand        – representative brand name, Title Case (from brand_normalised)
---  name         – cleaned base product name, Title Case (no brand / size)
---  weight_grams – pack size in grams
---  retailer     – retailer name, as scraped
---  price        – lowest price for that product/size at that retailer (cents)
---  currency     – e.g. 'NZD' (kept as-is)
---  url          – product page link for one of the cheapest offers at that retailer
---
--- Example output (creatine_offers):
--- product_id | brand              | name                 | weight_grams | retailer | price | currency | url
--- -----------+--------------------+----------------------+-------------+----------+-------+----------+-----
---     1      | Optimum Nutrition  | Creatine Monohydrate |    300       | Xplosiv  |  3995 |  NZD     | ...
---     1      | Optimum Nutrition  | Creatine Monohydrate |    300       | NZProtein|  4295 |  NZD     | ...
---
---
--- Table 2: creatine_final
--- -----------------------
--- One row per (representative creatine product × size),
--- deduplicated across retailers.
---
--- Columns:
---  product_id   – representative product id from products_collection.product_id
---  brand        – representative brand name, Title Case (from brand_normalised)
---  name         – cleaned base product name, Title Case (no brand / size)
---  weight_grams – pack size in grams
---  price        – lowest price found across all retailers (cents)
---  currency     – e.g. 'NZD' (kept as-is)
---  url          – product page link for one of the cheapest offers (any retailer)
---  value_score  – 0–100 scaled value score (higher = better grams per cent)
---
--- Example output (creatine_final):
--- product_id | brand              | name                 | weight_grams | price | value_score | currency | url
--- -----------+--------------------+----------------------+-------------+-------+-------------+----------+-----
---     1      | Optimum Nutrition  | Creatine Monohydrate |    300       |  3995 |    100      |  NZD     | ...
---     2      | Musashi            | Creatine Monohydrate |    500       |  4995 |     82      |  NZD     | ...
-------------------------------------------------------------
--- Helper: slugify "Brand Name 2.27kg" -> "brand-name-2-27kg"
-------------------------------------------------------------
-CREATE OR REPLACE FUNCTION slugify(input text)
-  RETURNS text
-  LANGUAGE sql
-  IMMUTABLE
-  AS $$
-  SELECT
-    regexp_replace(regexp_replace(lower(unaccent(input)), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g');
-$$;
-
-------------------------------------------------------------
--- Drop & recreate output tables
-------------------------------------------------------------
+-- This mirrors the protein 04_build pipeline but:
+--   - Uses scraped_creatine_only instead of scraped_protein_only
+--   - Does NOT use flavour expansion or flavour-based price adjustments
 DROP TABLE IF EXISTS creatine_offers CASCADE;
 
 DROP TABLE IF EXISTS creatine_final CASCADE;
 
 CREATE TABLE IF NOT EXISTS creatine_offers(
-  product_id bigint NOT NULL, -- canonical id (per brand+base_name+size+currency)
+  product_id bigint NOT NULL,
   brand citext,
-  name citext, -- base product name, no size
+  name citext,
   weight_grams integer,
   retailer citext NOT NULL,
   price integer NOT NULL,
@@ -76,13 +22,12 @@ CREATE TABLE IF NOT EXISTS creatine_offers(
 );
 
 CREATE TABLE IF NOT EXISTS creatine_final(
-  product_id bigint NOT NULL, -- canonical id (per brand+base_name+size+currency)
+  product_id bigint NOT NULL,
   brand citext,
-  name citext, -- base product name, no size
+  name citext,
   weight_grams integer,
   price integer NOT NULL,
   currency citext NOT NULL,
-  retailer citext,
   url citext NOT NULL,
   value_score numeric, -- 0–100 scaled “value” (higher = better grams per cent)
   slug citext
@@ -92,94 +37,70 @@ TRUNCATE TABLE creatine_offers;
 
 TRUNCATE TABLE creatine_final;
 
-------------------------------------------------------------
--- Step 1: Clean scraped creatine and assign canonical IDs
-------------------------------------------------------------
-WITH cleaned AS (
+WITH raw AS (
+  -- Step 1: build rows with one row per (product × size × retailer)
   SELECT
-    sc.product_id, -- scraped id, only used to derive canonical id
-    initcap(unaccent(sc.brand_scraped))::citext AS brand,
-    -- Base product name (no brand, no size):
-    --  - lower + unaccent + trim
-    --  - strip "dated 10/25" style phrases
-    --  - strip size tokens like "250g", "2kg", "250 g", "2.27 kg", "250gm", "250 grams"
-    --  - strip leading brand name (e.g. "Athletech", "Muscletech")
-    --  - collapse multiple spaces
-    --  - initcap at the end
-    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(lower(btrim(unaccent(sc.name_scraped::text))), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'),
-            -- strip sizes + any trailing junk that isn't a word char or %
-            '\s*\d+(?:\.\d+)?\s*(kg|g|gm|grams?)\b[^\w%]*', '', 'gi'), '^' || lower(unaccent(sc.brand_scraped::text)) || '\s+', '', 'i')))::citext AS name,
-    sc.weight_grams,
-    sc.amount_cents AS price,
-    sc.currency_scraped AS currency,
-    sc.retailer,
-    sc.url
+    pc.product_id AS product_id,
+    initcap(bc.brand_normalised) AS brand,
+    -- Use product_normalised / name_cleaned and strip "dated" phrases before initcap
+    initcap(btrim(regexp_replace(regexp_replace(COALESCE(pc.product_normalised, lower(btrim(unaccent(nc.name_cleaned)))), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'), '\s{2,}', ' ', 'g'))) AS name,
+    sis.weight_grams AS weight_grams,
+    sis.amount_cents AS price,
+    sis.currency_scraped AS currency,
+    sis.retailer AS retailer,
+    sis.url AS url,
+    ROW_NUMBER() OVER (PARTITION BY pc.product_id,
+      sis.weight_grams,
+      sis.currency_scraped,
+      sis.retailer ORDER BY sis.amount_cents ASC) AS rn
   FROM
-    scraped_creatine_only sc
+    scraped_creatine_only sis
+    JOIN name_cleaned nc ON nc.product_id = sis.product_id
+    LEFT JOIN brands_alias ba ON ba.brand_scraped = sis.brand_scraped
+    LEFT JOIN brands_collection bc ON bc.brand_id = ba.brand_id
+    LEFT JOIN products_collection pc ON pc.brand_id = bc.brand_id
+      AND pc.product_normalised = lower(btrim(unaccent(nc.name_cleaned)))
   WHERE
-    sc.weight_grams IS NOT NULL
-    AND sc.weight_grams > 0
-    AND sc.amount_cents IS NOT NULL
-    AND sc.amount_cents > 0
+    pc.product_id IS NOT NULL
 ),
-canonical_ids AS (
-  -- Stable canonical id per (brand, base_name, size, currency)
+cheapest AS (
+  -- Step 2: keep only the cheapest row per (product × size × currency × retailer)
   SELECT
-    MIN(product_id) AS canonical_product_id,
+    product_id,
     brand,
     name,
     weight_grams,
-    currency
+    price,
+    currency,
+    retailer,
+    url
   FROM
-    cleaned
-  GROUP BY
+    raw
+  WHERE
+    rn = 1
+),
+offers_aggregated AS (
+  -- Step 3a: per (product × size × currency × retailer): take lowest price (no flavours to aggregate)
+  SELECT
+    product_id,
     brand,
     name,
     weight_grams,
-    currency
-),
-dedup AS (
-  -- One row per (canonical product × size × currency × retailer) with min price
-  SELECT
-    c.canonical_product_id AS product_id,
-    c.brand,
-    c.name,
-    c.weight_grams,
-    c.currency,
-    cl.retailer,
-    MIN(cl.price) AS price,
-    MIN(cl.url) AS url
+    currency,
+    retailer,
+    MIN(price) AS price
   FROM
-    cleaned cl
-    JOIN canonical_ids c ON c.brand = cl.brand
-      AND c.name = cl.name
-      AND c.weight_grams = cl.weight_grams
-      AND c.currency = cl.currency
+    cheapest
   GROUP BY
-    c.canonical_product_id,
-    c.brand,
-    c.name,
-    c.weight_grams,
-    c.currency,
-    cl.retailer)
-INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, price, currency, url)
-SELECT
-  product_id,
-  brand,
-  name,
-  weight_grams,
-  retailer,
-  price,
-  currency,
-  url
-FROM
-  dedup;
-
-------------------------------------------------------------
--- Step 2: build creatine_final (one row per canonical product × size)
-------------------------------------------------------------
-WITH aggregated AS (
-  -- Per (canonical product × size × currency), get the cheapest price
+    product_id,
+    brand,
+    name,
+    weight_grams,
+    currency,
+    retailer
+),
+aggregated AS (
+  -- Step 3b: per (product × size × currency): take lowest price across all retailers
   SELECT
     product_id,
     brand,
@@ -188,7 +109,7 @@ WITH aggregated AS (
     currency,
     MIN(price) AS min_price
   FROM
-    creatine_offers
+    cheapest
   GROUP BY
     product_id,
     brand,
@@ -197,7 +118,7 @@ WITH aggregated AS (
     currency
 ),
 value_ranges AS (
-  -- Compute min/max raw value (grams per cent) for scaling to 0–100
+  -- Step 3c: compute min/max raw value (grams per cent) for scaling to 0–100
   SELECT
     MIN(weight_grams::numeric / NULLIF(min_price, 0)) AS min_raw_value,
     MAX(weight_grams::numeric / NULLIF(min_price, 0)) AS max_raw_value
@@ -209,7 +130,7 @@ value_ranges AS (
     AND weight_grams > 0
 ),
 scored AS (
-  -- Attach value_score (0–100) to each product row
+  -- Step 3d: attach value_score (0–100) to each creatine product row
   SELECT
     a.*,
     CASE WHEN a.min_price <= 0 THEN
@@ -227,53 +148,73 @@ scored AS (
     END AS value_score
   FROM
     aggregated a
-    CROSS JOIN value_ranges vr)
-INSERT INTO creatine_final(product_id, brand, name, weight_grams, price, currency, retailer, url, value_score, slug)
-SELECT
-  s.product_id,
-  s.brand,
-  -- FINAL cosmetic clean: strip any trailing sizes if they somehow survived
-  initcap(btrim(regexp_replace(lower(s.name::text), '\s*\d+(?:\.\d+)?\s*(kg|g|gm|grams?)\b[^\w%]*', '', 'gi')))::citext AS name,
-  s.weight_grams,
-  s.min_price AS price,
-  s.currency,
-  -- pick any retailer with the min price
-(
-    SELECT
-      MIN(co.retailer)
-    FROM creatine_offers co
-    WHERE
-      co.product_id = s.product_id
-      AND co.weight_grams = s.weight_grams
-      AND co.currency = s.currency
-      AND co.price = s.min_price) AS retailer,
-(
-    SELECT
-      MIN(co.url)
-    FROM
-      creatine_offers co
-    WHERE
-      co.product_id = s.product_id
-      AND co.weight_grams = s.weight_grams
-      AND co.currency = s.currency
-      AND co.price = s.min_price) AS url,
-  s.value_score,
-  -- slug based on the same size-free base name
-  slugify(COALESCE(s.brand::text, '') || ' ' || COALESCE(btrim(regexp_replace(lower(s.name::text), '\s*\d+(?:\.\d+)?\s*(kg|g|gm|grams?)\b[^\w%]*', '', 'gi')), '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
-      ''
-    ELSE
-      trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
-    END) AS slug
-FROM
-  scored s;
+    CROSS JOIN value_ranges vr
+),
+insert_offers AS (
+  -- Step 4a: insert into creatine_offers, picking a URL for the cheapest price per retailer
+  INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, price, currency, url)
+  SELECT
+    oa.product_id,
+    oa.brand,
+    oa.name,
+    oa.weight_grams,
+    oa.retailer,
+    oa.price,
+    oa.currency,
+    MIN(c.url) AS url -- any URL among those with the min price for that retailer
+  FROM
+    offers_aggregated oa
+    JOIN cheapest c ON c.product_id = oa.product_id
+      AND c.weight_grams = oa.weight_grams
+      AND c.currency = oa.currency
+      AND c.retailer = oa.retailer
+      AND c.price = oa.price
+  GROUP BY
+    oa.product_id,
+    oa.brand,
+    oa.name,
+    oa.weight_grams,
+    oa.retailer,
+    oa.price,
+    oa.currency
+  RETURNING
+    1)
+  -- Step 4b: insert into creatine_final, picking a URL for the global lowest price
+  INSERT INTO creatine_final(product_id, brand, name, weight_grams, price, currency, url, value_score, slug)
+  SELECT
+    s.product_id,
+    s.brand,
+    s.name,
+    s.weight_grams,
+    s.min_price AS price,
+    s.currency,
+    MIN(c.url) AS url, -- any URL among those with the global min price
+    s.value_score,
+    regexp_replace(regexp_replace(lower(unaccent(COALESCE(s.brand, '') || ' ' || COALESCE(s.name, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
+              ''
+            ELSE
+              trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
+            END)), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g') AS slug
+  FROM
+    scored s
+    JOIN cheapest c ON c.product_id = s.product_id
+      AND c.weight_grams = s.weight_grams
+      AND c.currency = s.currency
+      AND c.price = s.min_price
+  GROUP BY
+    s.product_id,
+    s.brand,
+    s.name,
+    s.weight_grams,
+    s.min_price,
+    s.currency,
+    s.value_score;
 
-------------------------------------------------------------
--- Step 3: snapshot today's prices into history (creatine)
-------------------------------------------------------------
+-- Step 5: snapshot today's prices into history (creatine)
 INSERT INTO price_history(category, product_id, weight_grams, retailer, price, currency, snapshot_date)
 SELECT
   'creatine'::citext AS category,
-  product_id, -- canonical id
+  product_id,
   weight_grams,
   retailer,
   price,
@@ -289,4 +230,14 @@ ON CONFLICT (category,
   DO UPDATE SET
     price = EXCLUDED.price,
     currency = EXCLUDED.currency;
+
+-- Helper: slugify "Brand Name 2.27kg" -> "brand-name-2-27kg"
+CREATE OR REPLACE FUNCTION slugify(input text)
+  RETURNS text
+  LANGUAGE sql
+  IMMUTABLE
+  AS $$
+  SELECT
+    regexp_replace(regexp_replace(lower(unaccent(input)), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g');
+$$;
 
