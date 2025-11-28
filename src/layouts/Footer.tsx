@@ -93,18 +93,18 @@ export default function Footer() {
               </li>
               <li>
                 <a
-                  href='/protein?retailer=sprintfit&brand=Premium%20Nutrition'
-                  className='hover:underline hover:opacity-80'
-                >
-                  Premium Nutrition
-                </a>
-              </li>
-              <li>
-                <a
                   href='/protein?retailer=sprintfit&brand=Optimum%20Nutrition'
                   className='hover:underline hover:opacity-80'
                 >
                   Optimum Nutrition
+                </a>
+              </li>
+              <li>
+                <a
+                  href='/protein?retailer=sprintfit&brand=Premium%20Nutrition'
+                  className='hover:underline hover:opacity-80'
+                >
+                  Premium Nutrition
                 </a>
               </li>
             </ul>
