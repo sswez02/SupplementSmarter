@@ -77,10 +77,10 @@ export default function Footer() {
             <ul className='mt-3 sm:mt-4 space-y-1.5 sm:space-y-2 text-base sm:text-lg md:text-xl font-semibold italic tracking-tight'>
               <li>
                 <a
-                  href='/protein?retailer=sprintfit&brand=MuscleSport'
+                  href='/protein?retailer=sprintfit&brand=BSN'
                   className='hover:underline hover:opacity-80'
                 >
-                  MuscleSport
+                  BSN
                 </a>
               </li>
               <li>
@@ -125,10 +125,10 @@ export default function Footer() {
             <ul className='mt-3 sm:mt-4 space-y-1.5 sm:space-y-2 text-base sm:text-lg md:text-xl font-semibold italic tracking-tight'>
               <li>
                 <a
-                  href='/protein?retailer=xplosiv&brand=MuscleTech'
+                  href='/protein?retailer=xplosiv&brand=Pack%20Nutrition'
                   className='hover:underline hover:opacity-80'
                 >
-                  MuscleTech
+                  Pack Nutrition
                 </a>
               </li>
               <li>
