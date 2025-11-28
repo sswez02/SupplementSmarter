@@ -219,7 +219,7 @@ function weightOptionMatches(weightKg: number | null | undefined, bucketId: stri
 
 export default function ProteinTable() {
   const navigate = useNavigate(); // URL navigation
-  const [params] = useSearchParams(); // URL query
+  const [params, setParams] = useSearchParams(); // URL query
   const [rows, setRows] = useState<any[]>([]); // table data
   const [sortKey, setSortKey] = useState<SortKey>(null); // col sorting
   const [sortDir, setSortDir] = useState<SortDir>('desc'); // sorting order
@@ -357,6 +357,27 @@ export default function ProteinTable() {
     return base;
   }, [filteredRows, sortKey, sortDir]);
 
+  // Filtering query URL
+  useEffect(() => {
+    const urlBrand = params.get('brand') || '';
+    const urlWeight = params.get('weight') || '';
+    const urlFlavour = params.get('flavour') || '';
+
+    setBrandFilter(urlBrand);
+    setWeightFilter(urlWeight);
+    setFlavourFilter(urlFlavour);
+  }, [params]);
+
+  function updateFilterParam(key: 'brand' | 'weight' | 'flavour', value: string) {
+    const next = new URLSearchParams(params);
+    if (value) {
+      next.set(key, value);
+    } else {
+      next.delete(key);
+    }
+    setParams(next, { replace: true });
+  }
+
   // UI states for sorting
   const sortableBase = 'font-medium px-2 cursor-pointer select-none transition-colors';
   const brandSortActive = sortKey === 'brand';
@@ -367,7 +388,6 @@ export default function ProteinTable() {
   const hasRows = displayRows.length > 0;
 
   /* Helpers for clicking navigation */
-
   const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>, id: string) => {
     if (!id) return;
 
@@ -442,7 +462,10 @@ export default function ProteinTable() {
               <div className='w-[180px]'>
                 <CustomDropdown
                   value={brandFilter}
-                  onChange={setBrandFilter}
+                  onChange={(v) => {
+                    setBrandFilter(v);
+                    updateFilterParam('brand', v);
+                  }}
                   options={brandOptions}
                   placeholder='All brands'
                 />
