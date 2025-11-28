@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS creatine_final(
   currency citext NOT NULL,
   retailer citext,
   url citext NOT NULL,
-  value_score numeric -- 0–100 scaled “value” (higher = better grams per cent)
+  value_score numeric, -- 0–100 scaled “value” (higher = better grams per cent)
+  slug citext
 );
 
 TRUNCATE TABLE creatine_offers;
@@ -119,7 +120,7 @@ cheapest AS (
     rn = 1
 ),
 offers_aggregated AS (
-  -- Step 3a: per (product × size × currency × retailer): aggregate flavours and take lowest price
+  -- Step 3a: per (product × size × currency × retailer): take lowest price
   SELECT
     product_id,
     brand,
@@ -127,7 +128,6 @@ offers_aggregated AS (
     MIN(weight_grams) AS weight_grams,
     currency,
     retailer,
-    string_agg(DISTINCT flavour, ', ' ORDER BY flavour) AS flavours,
     MIN(price) AS price
   FROM
     cheapest
@@ -135,19 +135,17 @@ offers_aggregated AS (
     product_id,
     brand,
     name,
-    weight_grams,
     currency,
     retailer
 ),
 aggregated AS (
-  -- Step 3b: per (product × size × currency): aggregate flavours across all retailers, take lowest price
+  -- Step 3b: per (product × size × currency): take lowest price across retailers
   SELECT
     product_id,
     brand,
     name,
     MIN(weight_grams) AS weight_grams,
     currency,
-    string_agg(DISTINCT flavour, ', ' ORDER BY flavour) AS flavours,
     MIN(price) AS min_price
   FROM
     cheapest
@@ -155,7 +153,6 @@ aggregated AS (
     product_id,
     brand,
     name,
-    weight_grams,
     currency
 ),
 value_ranges AS (
@@ -219,40 +216,37 @@ insert_offers AS (
     oa.price,
     oa.currency
   RETURNING
-    1
-),
--- Step 4b: insert into creatine_final, picking a URL for the global lowest price
-INSERT INTO creatine_final(
-  product_id, brand, name, weight_grams, price, currency, url, value_score, slug)
-SELECT
-  s.product_id,
-  s.brand,
-  s.name,
-  s.weight_grams,
-  s.min_price AS price,
-  s.currency,
-  s.retailer,
-  MIN(c.url) AS url, -- any URL among those with the global min price
-  s.value_score,
-  regexp_replace(regexp_replace(lower(unaccent(COALESCE(s.brand, '') || ' ' || COALESCE(s.name, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
-            ''
-          ELSE
-            trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
-          END)), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g') AS slug
-FROM
-  scored s
-  JOIN cheapest c ON c.product_id = s.product_id
-    AND c.currency = s.currency
-    AND c.price = s.min_price
-GROUP BY
-  s.product_id,
-  s.brand,
-  s.name,
-  s.weight_grams,
-  s.min_price,
-  s.currency,
-  s.retailer,
-  s.value_score;
+    1)
+  -- Step 4b: insert into creatine_final, picking a URL for the global lowest price
+  INSERT INTO creatine_final(product_id, brand, name, weight_grams, price, currency, retailer, url, value_score, slug)
+  SELECT
+    s.product_id,
+    s.brand,
+    s.name,
+    s.weight_grams,
+    s.min_price AS price,
+    s.currency,
+    MIN(c.retailer) AS retailer,
+    MIN(c.url) AS url, -- any URL among those with the global min price
+    s.value_score,
+    regexp_replace(regexp_replace(lower(unaccent(COALESCE(s.brand, '') || ' ' || COALESCE(s.name, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
+              ''
+            ELSE
+              trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
+            END)), '[^a-z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g') AS slug
+  FROM
+    scored s
+    JOIN cheapest c ON c.product_id = s.product_id
+      AND c.currency = s.currency
+      AND c.price = s.min_price
+  GROUP BY
+    s.product_id,
+    s.brand,
+    s.name,
+    s.weight_grams,
+    s.min_price,
+    s.currency,
+    s.value_score;
 
 -- Step 5: snapshot today's prices into history (creatine)
 INSERT INTO price_history(category, product_id, weight_grams, retailer, price, currency, snapshot_date)
