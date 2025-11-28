@@ -78,6 +78,7 @@ TRUNCATE TABLE creatine_offers;
 TRUNCATE TABLE creatine_final;
 
 WITH cleaned AS (
+  -- Normalise brand & name a bit and enforce positive price/weight
   SELECT
     sc.product_id,
     initcap(unaccent(sc.brand_scraped))::citext AS brand,
@@ -92,6 +93,7 @@ WITH cleaned AS (
   WHERE
     sc.weight_grams IS NOT NULL
     AND sc.weight_grams > 0
+    AND sc.amount_cents IS NOT NULL
     AND sc.amount_cents > 0
 ),
 cheapest_per_retailer AS (
@@ -119,7 +121,8 @@ cheapest_per_retailer AS (
     rn = 1
 ),
 insert_offers AS (
-INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, price, currency, url)
+  -- Fill creatine_offers
+  INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, price, currency, url)
   SELECT
     product_id,
     brand,
@@ -144,51 +147,42 @@ INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, pri
 best_overall AS (
   -- Lowest price across all retailers for each (brand, name, size, currency)
   SELECT
-    MIN(o.product_id) AS product_id,
-    o.brand,
-    o.name,
-    o.weight_grams,
-    o.currency,
-    MIN(o.price) AS min_price
+    MIN(product_id) AS product_id,
+    brand,
+    name,
+    weight_grams,
+    currency,
+    MIN(price) AS min_price
   FROM
-    creatine_offers o
+    cheapest_per_retailer
   GROUP BY
-    o.brand,
-    o.name,
-    o.weight_grams,
-    o.currency
-),
-value_ranges AS (
-  -- Range of grams-per-cent to scale into 0–100
-  SELECT
-    MIN(weight_grams::numeric / NULLIF(min_price, 0)) AS min_raw_value,
-    MAX(weight_grams::numeric / NULLIF(min_price, 0)) AS max_raw_value
-  FROM
-    best_overall
-  WHERE
-    min_price > 0
-    AND weight_grams IS NOT NULL
-    AND weight_grams > 0
+    brand,
+    name,
+    weight_grams,
+    currency
 ),
 scored AS (
+  -- Compute grams-per-cent and scale to 0–100 via window MIN/MAX
   SELECT
     b.*,
     CASE WHEN b.min_price <= 0 THEN
       NULL
-    WHEN b.weight_grams IS NULL THEN
+    WHEN b.weight_grams IS NULL
+      OR b.weight_grams <= 0 THEN
       NULL
-    WHEN b.weight_grams <= 0 THEN
-      NULL
-    WHEN vr.max_raw_value IS NULL THEN
-      100::numeric
-    WHEN vr.max_raw_value = vr.min_raw_value THEN
-      100::numeric
     ELSE
-      ROUND(((b.weight_grams::numeric / b.min_price) - vr.min_raw_value) / NULLIF(vr.max_raw_value - vr.min_raw_value, 0) * 100, 0)
-    END AS value_score
+      b.weight_grams::numeric / b.min_price
+    END AS raw_value
   FROM
     best_overall b
-    CROSS JOIN value_ranges vr)
+),
+scored_with_range AS (
+  SELECT
+    s.*,
+    MIN(raw_value) OVER () AS min_raw_value,
+    MAX(raw_value) OVER () AS max_raw_value
+  FROM
+    scored s)
 INSERT INTO creatine_final(product_id, brand, name, weight_grams, price, currency, retailer, url, value_score, slug)
 SELECT
   s.product_id,
@@ -199,14 +193,21 @@ SELECT
   s.currency,
   MIN(o.retailer) AS retailer,
   MIN(o.url) AS url,
-  s.value_score,
+  CASE WHEN s.raw_value IS NULL THEN
+    NULL
+  WHEN s.max_raw_value IS NULL
+    OR s.max_raw_value = s.min_raw_value THEN
+    100::numeric
+  ELSE
+    ROUND((s.raw_value - s.min_raw_value) / NULLIF(s.max_raw_value - s.min_raw_value, 0) * 100, 0)
+  END AS value_score,
   slugify(COALESCE(s.brand::text, '') || ' ' || COALESCE(s.name::text, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
       ''
     ELSE
       trim(TRAILING '0' FROM trim(TRAILING '.' FROM (ROUND(s.weight_grams::numeric / 1000, 2)::text))) || 'kg'
     END) AS slug
 FROM
-  scored s
+  scored_with_range s
   JOIN creatine_offers o ON o.brand = s.brand
     AND o.name = s.name
     AND o.weight_grams = s.weight_grams
@@ -219,7 +220,9 @@ GROUP BY
   s.weight_grams,
   s.min_price,
   s.currency,
-  s.value_score;
+  s.raw_value,
+  s.min_raw_value,
+  s.max_raw_value;
 
 -- Step 5: snapshot today's prices into history (creatine)
 INSERT INTO price_history(category, product_id, weight_grams, retailer, price, currency, snapshot_date)
