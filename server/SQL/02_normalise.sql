@@ -2,7 +2,16 @@
 -- Views + normalisation + upserts into *_collection / *_alias
 /* Flavour expansion and normalisation */
 -----------------------------------------
--- Only process in stock PRODUCTS, there can be out of stock FLAVOURS
+-- Ensure we create the 'scraped_in_stock' view early on
+CREATE OR REPLACE VIEW scraped_in_stock AS
+SELECT
+  *
+FROM
+  scraped_products
+WHERE
+  in_stock = TRUE;
+
+-- Flavour variant counting (counts distinct variants)
 CREATE OR REPLACE VIEW flavour_variant_counts AS
 SELECT
   lower(btrim(
@@ -20,6 +29,7 @@ WHERE
 GROUP BY
   1;
 
+-- Flavour best representative (selects a single best representative variant)
 CREATE OR REPLACE VIEW flavour_best_rep AS
 WITH pairs AS (
   SELECT
@@ -50,26 +60,123 @@ FROM
 WHERE
   rank = 1;
 
--- Now proceed with other views and functions, ensuring the order is correct
-CREATE OR REPLACE VIEW scraped_in_stock AS
-SELECT
-  *
-FROM
-  scraped_products
-WHERE
-  in_stock = TRUE;
-
 -- Helper function for removing specific phrases from strings
 CREATE OR REPLACE FUNCTION remove_phrases(src citext, phrase1 citext, variant1 text, phrase2 citext, variant2 text)
   RETURNS citext
   LANGUAGE plpgsql
   IMMUTABLE
   AS $$
-  -- function code remains unchanged
+DECLARE
+  tmp text := src::text;
+  pat text;
+BEGIN
+  IF phrase1 IS NOT NULL AND phrase1 <> '' THEN
+    pat := regexp_replace(phrase1::text, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- variant1 (no-spaces version)
+  IF variant1 IS NOT NULL AND variant1 <> '' THEN
+    pat := regexp_replace(variant1, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- phrase2
+  IF phrase2 IS NOT NULL AND phrase2 <> '' THEN
+    pat := regexp_replace(phrase2::text, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- variant2 (no-spaces version)
+  IF variant2 IS NOT NULL AND variant2 <> '' THEN
+    pat := regexp_replace(variant2, '([.^$*+?(){}\[\]\|\\])', '\\\1', 'g');
+    tmp := regexp_replace(tmp, pat, '', 'gi');
+  END IF;
+  -- collapse extra spaces
+  tmp := btrim(regexp_replace(tmp, '\s{2,}', ' ', 'g'));
+  RETURN tmp::citext;
+END;
 $$;
 
--- Create views and perform normalisation logic for flavours and brands here...
--- Final views and insertions
+-- Now proceed with normalisation logic for flavours and brands
+CREATE OR REPLACE VIEW scraped_flavours_flags AS
+SELECT
+  sis.product_id,
+  s_flavours_flags.flavour_scraped,
+(unaccent(lower(s_flavours_flags.flavour_scraped))
+    LIKE '%out of stock%'
+    OR unaccent(lower(s_flavours_flags.flavour_scraped))
+    LIKE '%not available for selected size%') AS out_of_stock,
+  COALESCE(NULLIF((regexp_match(s_flavours_flags.flavour_scraped, '([+-]?)\s*\$\s*(\d+(?:\.\d{1,2})?)'))[2], '')::numeric * CASE WHEN (regexp_match(s_flavours_flags.flavour_scraped, '([+-]?)\s*\$\s*(\d+(?:\.\d{1,2})?)'))[1] = '-' THEN
+    -1
+  ELSE
+    1
+  END, 0) AS price_add
+FROM
+  scraped_in_stock sis
+  CROSS JOIN LATERAL unnest(sis.flavours_scraped) AS s_flavours_flags(flavour_scraped);
+
+-- Compute per-flavour surcharges (in cents) and final price for IN-STOCK flavours only
+CREATE OR REPLACE VIEW scraped_flavour_stocked AS
+SELECT
+  s_flavours_flags.product_id,
+  s_flavours_flags.flavour_scraped AS flavour_scraped,
+  ROUND(s_flavours_flags.price_add * 100)::int AS price_add_cents, -- cents conversion
+  sis.amount_cents + ROUND(s_flavours_flags.price_add * 100)::int AS final_amount_cents -- added price for flavour variant
+FROM
+  scraped_flavours_flags s_flavours_flags
+  JOIN scraped_in_stock sis ON sis.product_id = s_flavours_flags.product_id
+WHERE
+  NOT s_flavours_flags.out_of_stock
+  AND btrim(s_flavours_flags.flavour_scraped) <> '';
+
+-- Brand normalisation (mirrors flavour flow)
+CREATE OR REPLACE VIEW brand_variant_counts AS
+SELECT
+  lower(btrim(
+      CASE WHEN brand_scraped ~* '^\s*r1\b' THEN
+        'Rule 1'
+      ELSE
+        brand_scraped
+      END)) AS variant,
+  COUNT(*) AS count
+FROM
+  scraped_in_stock
+WHERE
+  brand_scraped IS NOT NULL
+  AND btrim(brand_scraped) <> ''
+GROUP BY
+  1;
+
+-- Picks a single best representative spelling for each scraped brand variant
+CREATE OR REPLACE VIEW brand_best_rep AS
+WITH pairs AS (
+  SELECT
+    a.variant,
+    b.variant AS rep,
+    b.count AS rep_count
+  FROM
+    brand_variant_counts a
+    JOIN brand_variant_counts b ON similarity(a.variant, b.variant) >= 0.85
+),
+best_rep AS (
+  SELECT
+    variant,
+    rep,
+    rep_count,
+    ROW_NUMBER() OVER (PARTITION BY variant ORDER BY rep_count DESC,
+      length(rep) ASC,
+      rep ASC) AS rank
+  FROM
+    pairs
+)
+SELECT
+  variant,
+  rep,
+  rep_count
+FROM
+  best_rep
+WHERE
+  rank = 1;
+
+-- Flavour normalisation upsert into flavours_collection + flavours_alias
 WITH chosen AS (
   SELECT
     variant,
@@ -83,45 +190,4 @@ FROM
   chosen
 ON CONFLICT (flavour_normalised)
   DO NOTHING;
-
--- 03_filter_creatine.sql
--- Filter in-scope products (creatine only before building final tables)
-CREATE OR REPLACE VIEW scraped_creatine_only AS
-WITH base AS (
-  SELECT
-    sis.*,
-    nc.name_cleaned
-  FROM
-    scraped_in_stock sis
-    LEFT JOIN name_cleaned nc ON nc.product_id = sis.product_id
-)
-SELECT
-  product_id,
-  retailer,
-  brand_scraped,
-  name_scraped,
-  flavours_scraped,
-  weight_grams,
-  amount_cents,
-  currency_scraped,
-  url,
-  in_stock,
-  scraped_at,
-  json
-FROM
-  base
-WHERE
-  -- Must have a real weight
-  weight_grams IS NOT NULL
-  AND weight_grams > 0
-  -- Must have a usable name
-  AND COALESCE(name_cleaned::text, name_scraped::text) IS NOT NULL
-  AND btrim(COALESCE(name_cleaned::text, name_scraped::text)) <> ''
-  -- Must look like a creatine product
-  AND (COALESCE(name_cleaned::text, name_scraped::text)
-    ILIKE '%creatine%'
-    OR COALESCE(name_cleaned::text, name_scraped::text)
-    ILIKE '%creapure%'
-    OR COALESCE(name_cleaned::text, name_scraped::text)
-    ILIKE '%monohydrate%');
 
