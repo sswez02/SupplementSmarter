@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS products_final(
   flavours citext,
   price integer NOT NULL,
   currency citext NOT NULL,
-  retailer citext,
   url citext NOT NULL,
   value_score numeric, -- 0–100 scaled “value” (higher = better grams per cent)
   slug citext
@@ -253,7 +252,7 @@ insert_offers AS (
   RETURNING
     1)
   -- Step 4b: insert into products_final, picking a URL for the global lowest price
-  INSERT INTO products_final(product_id, brand, name, weight_grams, flavours, price, currency, retailer, url, value_score, slug)
+  INSERT INTO products_final(product_id, brand, name, weight_grams, flavours, price, currency, url, value_score, slug)
   SELECT
     s.product_id,
     s.brand,
@@ -262,8 +261,7 @@ insert_offers AS (
     s.flavours,
     s.min_price AS price,
     s.currency,
-    MIN(c.retailer) AS retailer,
-    MIN(c.url) AS url,
+    MIN(c.url) AS url, -- any URL among those with the global min price
     s.value_score,
     regexp_replace(regexp_replace(lower(unaccent(COALESCE(s.brand, '') || ' ' || COALESCE(s.name, '') || ' ' || CASE WHEN s.weight_grams IS NULL THEN
               ''
