@@ -77,7 +77,7 @@ export default function Footer() {
             <ul className='mt-3 sm:mt-4 space-y-1.5 sm:space-y-2 text-base sm:text-lg md:text-xl font-semibold italic tracking-tight'>
               <li>
                 <a
-                  href='/protein?retailer=sprintfit&brand=Musclesport'
+                  href='/protein?retailer=sprintfit&brand=MuscleSport'
                   className='hover:underline hover:opacity-80'
                 >
                   MuscleSport
@@ -85,7 +85,7 @@ export default function Footer() {
               </li>
               <li>
                 <a
-                  href='/creatine?retailer=sprintfit&brand=Musclepharm'
+                  href='/creatine?retailer=sprintfit&brand=MusclePharm'
                   className='hover:underline hover:opacity-80'
                 >
                   Musclepharm
@@ -145,14 +145,6 @@ export default function Footer() {
                   className='hover:underline hover:opacity-80'
                 >
                   Nothing Naughty
-                </a>
-              </li>
-              <li>
-                <a
-                  href='/protein?retailer=xplosiv&brand=Optimum%20Nutrition'
-                  className='hover:underline hover:opacity-80'
-                >
-                  Optimum Nutrition
                 </a>
               </li>
               <li>
