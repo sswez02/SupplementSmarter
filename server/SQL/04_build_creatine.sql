@@ -106,69 +106,72 @@ WITH cleaned AS (
     --  - strip leading brand name (e.g. "Athletech", "Muscletech")
     --  - collapse multiple spaces
     --  - initcap at the end
-    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(
-              -- remove size: "250g", "2kg", "250 g", "2.27 kg"
-              regexp_replace(
-                -- remove " - dated 10/25" / "dated 01/2026"
-                lower(btrim(unaccent(sc.name_scraped::text))), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'), '\s*\d+(?:\.\d+)?\s*(kg|g)\b', '', 'gi'),
-              -- remove leading brand: "Athletech " / "Muscletech " etc.
-              '^' || lower(unaccent(sc.brand_scraped::text)) || '\s+', '', 'i'), '\s{2,}', ' ', 'g')))::citext AS name, sc.weight_grams, sc.amount_cents AS price, sc.currency_scraped AS currency, sc.retailer, sc.url FROM scraped_creatine_only sc
-      WHERE
-        sc.weight_grams IS NOT NULL
-        AND sc.weight_grams > 0
-        AND sc.amount_cents IS NOT NULL
-        AND sc.amount_cents > 0),
-    canonical_ids AS (
-      -- Stable canonical id per (brand, base_name, size, currency)
-      SELECT
-        MIN(product_id) AS canonical_product_id,
-        brand,
-        name,
-        weight_grams,
-        currency
-      FROM
-        cleaned
-      GROUP BY
-        brand,
-        name,
-        weight_grams,
-        currency),
-      dedup AS (
-        -- One row per (canonical product × size × currency × retailer) with min price
-        SELECT
-          c.canonical_product_id AS product_id,
-          c.brand,
-          c.name,
-          c.weight_grams,
-          c.currency,
-          cl.retailer,
-          MIN(cl.price) AS price,
-          MIN(cl.url) AS url
-        FROM
-          cleaned cl
-          JOIN canonical_ids c ON c.brand = cl.brand
-            AND c.name = cl.name
-            AND c.weight_grams = cl.weight_grams
-            AND c.currency = cl.currency
-        GROUP BY
-          c.canonical_product_id,
-          c.brand,
-          c.name,
-          c.weight_grams,
-          c.currency,
-          cl.retailer)
-        INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, price, currency, url)
-        SELECT
-          product_id,
-          brand,
-          name,
-          weight_grams,
-          retailer,
-          price,
-          currency,
-          url
-        FROM
-          dedup;
+    initcap(btrim(regexp_replace(regexp_replace(regexp_replace(lower(btrim(unaccent(sc.name_scraped::text))), '\s*[-–]?\s*dated\s*\d{1,2}/\d{2,4}', '', 'gi'), '\s*\d+(?:\.\d+)?\s*(kg|g)\b', '', 'gi'), '^' || lower(unaccent(sc.brand_scraped::text)) || '\s+', '', 'i')))::citext AS name,
+    sc.weight_grams,
+    sc.amount_cents AS price,
+    sc.currency_scraped AS currency,
+    sc.retailer,
+    sc.url
+  FROM
+    scraped_creatine_only sc
+  WHERE
+    sc.weight_grams IS NOT NULL
+    AND sc.weight_grams > 0
+    AND sc.amount_cents IS NOT NULL
+    AND sc.amount_cents > 0
+),
+canonical_ids AS (
+  -- Stable canonical id per (brand, base_name, size, currency)
+  SELECT
+    MIN(product_id) AS canonical_product_id,
+    brand,
+    name,
+    weight_grams,
+    currency
+  FROM
+    cleaned
+  GROUP BY
+    brand,
+    name,
+    weight_grams,
+    currency
+),
+dedup AS (
+  -- One row per (canonical product × size × currency × retailer) with min price
+  SELECT
+    c.canonical_product_id AS product_id,
+    c.brand,
+    c.name,
+    c.weight_grams,
+    c.currency,
+    cl.retailer,
+    MIN(cl.price) AS price,
+    MIN(cl.url) AS url
+  FROM
+    cleaned cl
+    JOIN canonical_ids c ON c.brand = cl.brand
+      AND c.name = cl.name
+      AND c.weight_grams = cl.weight_grams
+      AND c.currency = cl.currency
+  GROUP BY
+    c.canonical_product_id,
+    c.brand,
+    c.name,
+    c.weight_grams,
+    c.currency,
+    cl.retailer)
+INSERT INTO creatine_offers(product_id, brand, name, weight_grams, retailer, price, currency, url)
+SELECT
+  product_id,
+  brand,
+  name,
+  weight_grams,
+  retailer,
+  price,
+  currency,
+  url
+FROM
+  dedup;
 
 ------------------------------------------------------------
 -- Step 2: build creatine_final (one row per canonical product × size)
@@ -227,6 +230,7 @@ INSERT INTO creatine_final(product_id, brand, name, weight_grams, price, currenc
 SELECT
   s.product_id,
   s.brand,
+  -- FINAL cosmetic clean: strip any trailing sizes if they somehow survived
   initcap(btrim(regexp_replace(lower(s.name::text), '\s*\d+(?:\.\d+)?\s*(kg|g)\b', '', 'gi')))::citext AS name,
   s.weight_grams,
   s.min_price AS price,
