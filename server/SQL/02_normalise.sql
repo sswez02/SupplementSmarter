@@ -2,7 +2,6 @@
 -- Views + normalisation + upserts into *_collection / *_alias
 /* Flavour expansion and normalisation */
 -----------------------------------------
--- Ensure we create the 'scraped_in_stock' view early on
 CREATE OR REPLACE VIEW scraped_in_stock AS
 SELECT
   *
@@ -15,17 +14,17 @@ WHERE
 CREATE OR REPLACE VIEW flavour_variant_counts AS
 SELECT
   lower(btrim(
-      CASE WHEN flavour_scraped ~* '^\s*r1\b' THEN
+      CASE WHEN flavours_scraped ~* '^\s*r1\b' THEN
         'Rule 1'
       ELSE
-        flavour_scraped
+        flavours_scraped
       END)) AS variant,
   COUNT(*) AS count
 FROM
   scraped_in_stock
 WHERE
-  flavour_scraped IS NOT NULL
-  AND btrim(flavour_scraped) <> ''
+  flavours_scraped IS NOT NULL
+  AND btrim(flavours_scraped) <> ''
 GROUP BY
   1;
 
@@ -119,75 +118,11 @@ SELECT
   s_flavours_flags.product_id,
   s_flavours_flags.flavour_scraped AS flavour_scraped,
   ROUND(s_flavours_flags.price_add * 100)::int AS price_add_cents, -- cents conversion
-  sis.amount_cents + ROUND(s_flavours_flags.price_add * 100)::int AS final_amount_cents -- added price for flavour variant
+  sis.amount_cents + ROUND(s_flavours_flags.price_add * 100)::int AS final_amount_cents
 FROM
   scraped_flavours_flags s_flavours_flags
   JOIN scraped_in_stock sis ON sis.product_id = s_flavours_flags.product_id
 WHERE
   NOT s_flavours_flags.out_of_stock
   AND btrim(s_flavours_flags.flavour_scraped) <> '';
-
--- Brand normalisation (mirrors flavour flow)
-CREATE OR REPLACE VIEW brand_variant_counts AS
-SELECT
-  lower(btrim(
-      CASE WHEN brand_scraped ~* '^\s*r1\b' THEN
-        'Rule 1'
-      ELSE
-        brand_scraped
-      END)) AS variant,
-  COUNT(*) AS count
-FROM
-  scraped_in_stock
-WHERE
-  brand_scraped IS NOT NULL
-  AND btrim(brand_scraped) <> ''
-GROUP BY
-  1;
-
--- Picks a single best representative spelling for each scraped brand variant
-CREATE OR REPLACE VIEW brand_best_rep AS
-WITH pairs AS (
-  SELECT
-    a.variant,
-    b.variant AS rep,
-    b.count AS rep_count
-  FROM
-    brand_variant_counts a
-    JOIN brand_variant_counts b ON similarity(a.variant, b.variant) >= 0.85
-),
-best_rep AS (
-  SELECT
-    variant,
-    rep,
-    rep_count,
-    ROW_NUMBER() OVER (PARTITION BY variant ORDER BY rep_count DESC,
-      length(rep) ASC,
-      rep ASC) AS rank
-  FROM
-    pairs
-)
-SELECT
-  variant,
-  rep,
-  rep_count
-FROM
-  best_rep
-WHERE
-  rank = 1;
-
--- Flavour normalisation upsert into flavours_collection + flavours_alias
-WITH chosen AS (
-  SELECT
-    variant,
-    rep
-  FROM
-    flavour_best_rep)
-INSERT INTO flavours_collection(flavour_normalised)
-SELECT DISTINCT
-  rep
-FROM
-  chosen
-ON CONFLICT (flavour_normalised)
-  DO NOTHING;
 
