@@ -77,18 +77,18 @@ export default function Footer() {
             <ul className='mt-3 sm:mt-4 space-y-1.5 sm:space-y-2 text-base sm:text-lg md:text-xl font-semibold italic tracking-tight'>
               <li>
                 <a
-                  href='/protein?retailer=sprintfit&brand=BSN'
+                  href='/protein?retailer=sprintfit&brand=Athena'
                   className='hover:underline hover:opacity-80'
                 >
-                  BSN
+                  Athena
                 </a>
               </li>
               <li>
                 <a
-                  href='/creatine?retailer=sprintfit&brand=MusclePharm'
+                  href='/protein?retailer=sprintfit&brand=BSN'
                   className='hover:underline hover:opacity-80'
                 >
-                  Musclepharm
+                  BSN
                 </a>
               </li>
               <li>
@@ -125,14 +125,6 @@ export default function Footer() {
             <ul className='mt-3 sm:mt-4 space-y-1.5 sm:space-y-2 text-base sm:text-lg md:text-xl font-semibold italic tracking-tight'>
               <li>
                 <a
-                  href='/protein?retailer=xplosiv&brand=Pack%20Nutrition'
-                  className='hover:underline hover:opacity-80'
-                >
-                  Pack Nutrition
-                </a>
-              </li>
-              <li>
-                <a
                   href='/protein?retailer=xplosiv&brand=Mutant'
                   className='hover:underline hover:opacity-80'
                 >
@@ -145,6 +137,14 @@ export default function Footer() {
                   className='hover:underline hover:opacity-80'
                 >
                   Nothing Naughty
+                </a>
+              </li>
+              <li>
+                <a
+                  href='/protein?retailer=xplosiv&brand=Pack%20Nutrition'
+                  className='hover:underline hover:opacity-80'
+                >
+                  Pack Nutrition
                 </a>
               </li>
               <li>
