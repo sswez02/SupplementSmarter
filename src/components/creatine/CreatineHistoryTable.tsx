@@ -17,6 +17,7 @@ type PriceSummary = {
   currencySymbol?: string;
   dateISO?: string;
   store?: string;
+  retailer?: string;
 };
 
 type HistoryRow = {
@@ -170,10 +171,39 @@ export default function CreatineProductDetail() {
   );
 
   const retailerCount = retailerRows.length;
-  const allTime = detail?.allTimeLow ?? null;
-  const currentMin = detail?.currentLow ?? null;
   const history = detail?.history ?? [];
-  const bestRetailer = currentMin?.store ?? null;
+
+  const allTime = useMemo<PriceSummary | null>(() => {
+    // If backend already computed one, keep it as a fallback when we have no history
+    if (!history.length) return detail?.allTimeLow ?? null;
+
+    return history.reduce<PriceSummary | null>((best, row) => {
+      const candidate: PriceSummary = {
+        priceCents: row.priceCents,
+        dateISO: row.date,
+        retailer: row.retailer,
+      };
+
+      if (!best) return candidate;
+
+      // Strictly lower price always better
+      if (candidate.priceCents < best.priceCents) return candidate;
+
+      // Same price = pick the most recent date
+      if (candidate.priceCents === best.priceCents && candidate.dateISO! > (best.dateISO ?? '')) {
+        return candidate;
+      }
+
+      return best;
+    }, null);
+  }, [history, detail]);
+
+  const currentMin = detail?.currentLow ?? null;
+  const allTimeStore = allTime?.store ?? allTime?.retailer ?? '';
+  const currentStore = currentMin?.store ?? currentMin?.retailer ?? '';
+
+  // Lowest current price retailer for row highlight
+  const bestRetailer = currentStore || null;
 
   function handleBack() {
     navigate('/creatine');
@@ -327,7 +357,7 @@ export default function CreatineProductDetail() {
           <div className='mt-1 text-xs text-black/30'>
             {allTime?.dateISO ? formatDateISO(allTime.dateISO) : ''}
           </div>
-          <div className='mt-3 text-sm text-black/60'>{allTime?.store || ''}</div>
+          <div className='mt-3 text-sm text-black/60'>{allTimeStore}</div>
         </div>
         {/* Current low card */}
         <div
@@ -367,7 +397,7 @@ export default function CreatineProductDetail() {
                   : '—'}
               </span>
             </div>
-            <div className='mt-3 text-sm text-black/60'>{currentMin?.store || ''}</div>
+            <div className='mt-3 text-sm text-black/60'>{currentStore}</div>
           </div>
         </div>
       </div>

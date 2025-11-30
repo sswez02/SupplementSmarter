@@ -178,11 +178,9 @@ export default function ProductDetail() {
 
   const retailerCount = retailerRows.length;
   const history = detail?.history ?? [];
-
   const allTime = useMemo<PriceSummary | null>(() => {
     // If backend already computed one, keep it as a fallback when we have no history
     if (!history.length) return detail?.allTimeLow ?? null;
-
     return history.reduce<PriceSummary | null>((best, row) => {
       const candidate: PriceSummary = {
         priceCents: row.priceCents,
@@ -194,8 +192,7 @@ export default function ProductDetail() {
 
       // Strictly lower price always better
       if (candidate.priceCents < best.priceCents) return candidate;
-
-      // Same price pick the most recent date
+      // Same price = pick the most recent date
       if (candidate.priceCents === best.priceCents && candidate.dateISO! > (best.dateISO ?? '')) {
         return candidate;
       }
