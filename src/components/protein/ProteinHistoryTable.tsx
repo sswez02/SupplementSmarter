@@ -177,10 +177,34 @@ export default function ProductDetail() {
   );
 
   const retailerCount = retailerRows.length;
-  const allTime = detail?.allTimeLow ?? null;
-  const currentMin = detail?.currentLow ?? null;
   const history = detail?.history ?? [];
 
+  const allTime = useMemo<PriceSummary | null>(() => {
+    // If backend already computed one, keep it as a fallback when we have no history
+    if (!history.length) return detail?.allTimeLow ?? null;
+
+    return history.reduce<PriceSummary | null>((best, row) => {
+      const candidate: PriceSummary = {
+        priceCents: row.priceCents,
+        dateISO: row.date,
+        retailer: row.retailer,
+      };
+
+      if (!best) return candidate;
+
+      // Strictly lower price always better
+      if (candidate.priceCents < best.priceCents) return candidate;
+
+      // Same price pick the most recent date
+      if (candidate.priceCents === best.priceCents && candidate.dateISO! > (best.dateISO ?? '')) {
+        return candidate;
+      }
+
+      return best;
+    }, null);
+  }, [history, detail]);
+
+  const currentMin = detail?.currentLow ?? null;
   const allTimeStore = allTime?.store ?? allTime?.retailer ?? '';
   const currentStore = currentMin?.store ?? currentMin?.retailer ?? '';
 
