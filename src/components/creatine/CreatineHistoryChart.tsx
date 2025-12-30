@@ -172,7 +172,7 @@ export default function CreatineHistoryChart({ rows }: { rows: HistoryRow[] }) {
             <h3 className='text-sm sm:text-base font-medium text-black/75'>Price over time</h3>
 
             {/* Range toggle */}
-            <div className='flex items-center gap-1 rounded-xl bg-[#F3F5FA] p-1 ring-1 ring-black/6'>
+            <div className='ml-auto -mr-2 sm:-mr-3 flex items-center gap-1 rounded-xl bg-[#F3F5FA] p-1 ring-1 ring-black/6'>
               {RANGE_OPTIONS.map((opt) => {
                 const active = opt.key === range;
                 return (
