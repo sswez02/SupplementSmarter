@@ -13,12 +13,21 @@ import {
 } from 'recharts';
 
 type HistoryRow = {
-  date: string;
+  date: string; // "YYYY-MM-DD"
   retailer: string;
   priceCents: number;
 };
 
 const COLOURS = ['#FF8709', '#F78EAA', '#FFB347', '#FFBBD5'] as const;
+
+type RangeKey = 'ALL' | '30D' | '6M' | '1Y';
+
+const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
+  { key: '30D', label: 'Last 30 days' },
+  { key: '6M', label: 'Last 6 months' },
+  { key: '1Y', label: 'Last year' },
+  { key: 'ALL', label: 'All time' },
+];
 
 // Deterministic hash-based mapping from retailer name to a colour
 function retailerColour(name: string): string {
@@ -36,28 +45,80 @@ function formatDateLabel(value: string) {
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleDateString('en-NZ', {
     day: 'numeric',
-    month: 'short', // e.g. "11 Nov"
+    month: 'short',
   });
+}
+
+function parseISODate(value: string): Date | null {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function addDays(d: Date, days: number) {
+  const next = new Date(d);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addMonths(d: Date, months: number) {
+  const next = new Date(d);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function addYears(d: Date, years: number) {
+  const next = new Date(d);
+  next.setFullYear(next.getFullYear() + years);
+  return next;
 }
 
 export default function ProteinHistoryChart({ rows }: { rows: HistoryRow[] }) {
   const [mounted, setMounted] = useState(false);
+  const [range, setRange] = useState<RangeKey>('ALL'); // default: all time
 
   // Only render the chart after mount
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const { data, retailers, globalMinPrice, domainMin, domainMax, ticks } = useMemo(() => {
-    const byDate = new Map<string, any>(); // date (key) -> { date, [retailer]: priceDollars } (value)
-    const names = new Set<string>(); // retailer names
+  // Pick an anchor "end date" = latest date in the dataset
+  const latestDate = useMemo(() => {
+    let latest: Date | null = null;
+    for (const r of rows || []) {
+      const d = parseISODate(r.date);
+      if (!d) continue;
+      if (!latest || d > latest) latest = d;
+    }
+    return latest;
+  }, [rows]);
 
-    // Min and max of all time and all retailers
+  // Filter rows by selected range
+  const filteredRows = useMemo(() => {
+    if (!rows?.length) return [];
+
+    if (range === 'ALL') return rows;
+
+    const end = latestDate ?? new Date();
+    let start: Date;
+
+    if (range === '30D') start = addDays(end, -30);
+    else if (range === '6M') start = addMonths(end, -6);
+    else start = addYears(end, -1);
+
+    return rows.filter((r) => {
+      const d = parseISODate(r.date);
+      return d ? d >= start && d <= end : false;
+    });
+  }, [rows, range, latestDate]);
+
+  const { data, retailers, globalMinPrice, domainMin, domainMax, ticks } = useMemo(() => {
+    const byDate = new Map<string, any>(); // date -> { date, [retailer]: priceDollars }
+    const names = new Set<string>();
+
     let globalMinPrice: number | null = null;
     let globalMaxPrice: number | null = null;
 
-    // For each retailer x date x price
-    for (const r of rows || []) {
+    for (const r of filteredRows || []) {
       const retailer = r.retailer;
       const date = r.date;
       const price = (r.priceCents ?? 0) / 100;
@@ -65,9 +126,8 @@ export default function ProteinHistoryChart({ rows }: { rows: HistoryRow[] }) {
       names.add(retailer);
 
       const obj = byDate.get(date) ?? { date };
-      const existing = obj[retailer]; // current stored price
+      const existing = obj[retailer];
 
-      // Retailer daily min for the timeline chart
       const nextPrice = existing == null ? price : Math.min(existing, price);
       obj[retailer] = nextPrice;
       byDate.set(date, obj);
@@ -76,23 +136,21 @@ export default function ProteinHistoryChart({ rows }: { rows: HistoryRow[] }) {
       if (globalMaxPrice == null || price > globalMaxPrice) globalMaxPrice = price;
     }
 
-    // Sorted from date
     const sorted = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-    const padding = 10; // y-axis padding
+    const padding = 10;
     const baseMin = globalMinPrice ?? 0;
     const baseMax = globalMaxPrice ?? baseMin;
+
     const rawMin = baseMin - padding;
     const rawMax = baseMax + padding;
-    const STEP = 5; // y-axis label step
-    const domainMin = Math.floor(rawMin / STEP) * STEP; // bottom value of y-axis
-    const domainMax = Math.ceil(rawMax / STEP) * STEP; // top value of y-axis
 
-    // Increment for the y-axis labelling
+    const STEP = 5;
+    const domainMin = Math.floor(rawMin / STEP) * STEP;
+    const domainMax = Math.ceil(rawMax / STEP) * STEP;
+
     const ticks: number[] = [];
-    for (let v = domainMin; v <= domainMax; v += STEP) {
-      ticks.push(v);
-    }
+    for (let v = domainMin; v <= domainMax; v += STEP) ticks.push(v);
 
     return {
       data: sorted,
@@ -102,7 +160,7 @@ export default function ProteinHistoryChart({ rows }: { rows: HistoryRow[] }) {
       domainMax,
       ticks,
     };
-  }, [rows]);
+  }, [filteredRows]);
 
   if (!mounted || !data.length) return null;
 
@@ -110,11 +168,32 @@ export default function ProteinHistoryChart({ rows }: { rows: HistoryRow[] }) {
     <section className='mx-auto w-full max-w-6xl lg:max-w-7xl xl:max-w-screen-2xl mt-10 mb-12 sm:mb-16'>
       <div className='relative'>
         <div className='relative z-10 bg-white rounded-2xl p-4 sm:p-6'>
-          <div className='flex items-center justify-between mb-3 sm:mb-4'>
+          <div className='flex items-center justify-between gap-3 mb-3 sm:mb-4'>
             <h3 className='text-sm sm:text-base font-medium text-black/75'>Price over time</h3>
+
+            {/* Range toggle */}
+            <div className='flex items-center gap-1 rounded-xl bg-black/[0.03] p-1'>
+              {RANGE_OPTIONS.map((opt) => {
+                const active = opt.key === range;
+                return (
+                  <button
+                    key={opt.key}
+                    type='button'
+                    onClick={() => setRange(opt.key)}
+                    className={[
+                      'px-2.5 py-1.5 text-[11px] sm:text-xs rounded-lg transition',
+                      active
+                        ? 'bg-white shadow-sm text-black/80'
+                        : 'text-black/55 hover:text-black/70 hover:bg-white/60',
+                    ].join(' ')}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Ensure the container has real height & width */}
           <div className='h-[260px] sm:h-[380px] min-w-0'>
             <ResponsiveContainer width='100%' height='100%'>
               <LineChart data={data} margin={{ top: 16, right: 40, left: 4, bottom: 12 }}>
