@@ -30,7 +30,13 @@
     "db:apply:all": "npm run db:clean && npm run db:apply:schema && npm run db:apply:norm && npm run db:build",
     "db:reset-and-scrape": "npm run db:clean && npm run db:apply:schema && npm run scrape:all && npm run scrape:creatine:all && npm run db:apply:norm && npm run db:build",
     "db:rescrape": "npm run scrape:all && npm run scrape:creatine:all && npm run db:apply:norm && npm run db:build",
-    "dev": "npx tsx src/index.ts"
+    "dev": "npx tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run test/unit",
+    "test:api": "vitest run test/api",
+    "test:scrape": "vitest run test/scrapers",
+    "test:ci": "npm run test:unit && npm run test:api"
   },
   "keywords": [],
   "author": "",
@@ -42,15 +48,17 @@
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.15.6",
+    "@types/supertest": "^6.0.3",
     "cheerio": "^1.1.2",
     "cross-env": "^10.1.0",
     "dotenv": "^17.2.3",
     "playwright": "^1.56.1",
     "prettier": "^3.6.2",
     "prettier-plugin-sql": "^0.19.2",
+    "supertest": "^7.1.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.8"
+    "vitest": "^4.0.16"
   },
   "dependencies": {
     "axios": "^1.13.2",
