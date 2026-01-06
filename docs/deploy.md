@@ -19,7 +19,7 @@ The key operational goals are:
 
 ---
 
-## Deployment (server)
+## Deployment
 
 Deployment is intentionally simple and repeatable.
 
@@ -47,3 +47,35 @@ What this does:
 - Changes into the server directory
 - Runs the ingestion pipeline
 - Appends stdout/stderr to a persistent log file on disk
+
+## Commands
+
+1. SSH
+
+```
+ssh -i ~/.ssh/supplementsmarter_2026 ubuntu@13.211.177.48
+```
+
+2. Update code
+
+```
+cd ~/SupplementSmarter
+git fetch --all --prune
+git checkout server
+git pull origin server
+```
+
+3. Install server deps
+
+```
+cd server
+npm ci
+```
+
+4. Restart API
+
+```
+pm2 restart supplement-api
+pm2 status
+pm2 logs supplement-api --lines 100
+```
