@@ -39,15 +39,12 @@ SupplementSmarter addresses this by:
 
 - Protein + Creatine category pages, ranked by value
 - Search suggestions across categories
-- Product detail pages:
+- Product pages with:
   - current offers (per retailer)
   - price history timeline
   - all-time low + current low summaries
-- Scraping + normalisation pipeline (reproducible scripts)
-- Test suite:
-  - unit tests for normalisation
-  - API integration tests (health + suggest)
-  - scraper tests (field validation + runtime sanity)
+- Daily scrape + normalisation pipeline
+- Automated tests (unit + API + scraper checks)
 
 ---
 
@@ -57,57 +54,33 @@ SupplementSmarter addresses this by:
 - Schema (PDF): `docs/schema/schema.pdf`
 - Deploy: `docs/deploy.md`
 - Normalisation & matching: `docs/normalisation_matching.md`
+- Value score: `docs/value_score.md`
 
 ---
 
-## Technical Overview
+## Numbers (production)
 
-### Frontend
-
-- Vite + React + TypeScript
-- Tailwind CSS
-- Product tables, search suggestions, product pages
-- Price history chart UI (range toggle + per-retailer lines)
-
-### Backend (`/server`)
-
-- Node.js + Express (TypeScript via `tsx`)
-- PostgreSQL (`pg`)
-- Endpoints:
-  - `GET /health`
-  - `GET /api/protein`
-  - `GET /api/protein/suggest?q=...`
-  - `GET /api/protein/:slug`
-  - `GET /api/creatine`
-  - `GET /api/creatine/suggest?q=...`
-  - `GET /api/creatine/:slug`
-  - `GET /api/supplements/suggest?q=...`
-
-### Data Pipeline
-
-- Playwright-based scrapers per retailer (protein + creatine)
-- SQL scripts to:
-  - apply schema
-  - normalise raw scraped rows
-  - build final category tables used by the API
-- Price history table used for timelines + lows
+- Retailers: 4 (SprintFit, NoWhey, Xplosiv, NZProtein)
+- Raw listing snapshots: 24,683 rows in `public.scraped_products`
+- In-stock at scrape-time: 94.7%
+- Scheduled ingestion: daily cron (~03:00 NZT)
 
 ---
 
-## System Architecture
+## Tech Stack
 
-1. Scrapers collect product listings from retailers → store raw rows.
-2. SQL normalisation standardises fields (name/brand/weight/currency, etc.).
-3. Build scripts create “final” category tables and compute value ranking.
-4. API serves:
-   - ranked lists (value-first)
-   - suggestions
-   - product detail (offers + history + lows)
-5. Frontend renders the comparison UI + charts.
-
-This separation keeps scraping, normalisation, API, and UI **modular and testable**.
+**Frontend:** Vite + React + TypeScript, Tailwind  
+**Backend:** Node.js + Express (TypeScript via `tsx`), PostgreSQL  
+**Pipeline:** Playwright/Cheerio scrapers + SQL normalisation + read-optimised tables
 
 ---
+
+## API (high-level)
+
+- `GET /health`
+- `GET /api/protein` (+ `/suggest`, `/:slug`)
+- `GET /api/creatine` (+ `/suggest`, `/:slug`)
+- `GET /api/supplements/suggest?q=...`
 
 ## Tests
 
