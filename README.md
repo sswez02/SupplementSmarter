@@ -8,9 +8,9 @@
   🔗 <a href="https://www.supplement-smarter.com/">https://www.supplement-smarter.com/</a>
 </p>
 
-**SupplementSmarter** is a price-tracking + comparison app for supplements (starting with **protein** and **creatine**) built as a production-style full-stack project.
+**SupplementSmarter** is a price-tracking + comparison app for supplements (starting with **protein** and **creatine**) built as a production-style full-stack project
 
-It combines a product browsing UI with a backend pipeline that **scrapes retailer listings**, **normalises product data**, and serves ranked results (value-first) plus **price history** and **all-time low** summaries.
+It combines a product browsing UI with a backend pipeline that **scrapes retailer listings**, **normalises product data**, and serves ranked results (value-first) plus **price history** and **all-time low** summaries
 
 ---
 
