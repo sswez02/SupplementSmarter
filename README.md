@@ -82,6 +82,8 @@ SupplementSmarter addresses this by:
 - `GET /api/creatine` (+ `/suggest`, `/:slug`)
 - `GET /api/supplements/suggest?q=...`
 
+---
+
 ## Tests
 
 From `server/`:
