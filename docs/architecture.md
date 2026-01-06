@@ -1,4 +1,4 @@
-# SupplementSmarter - Architecture (docs/architecture.mmd)
+# SupplementSmarter - Architecture
 
 This document shows the **request path** (user to UI to API to DB) and the **ingestion path** (cron to scrapers to raw snapshots to SQL normalisation/build to read-optimised tables)
 
