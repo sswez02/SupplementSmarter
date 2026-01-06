@@ -12,6 +12,12 @@
 
 It combines a product browsing UI with a backend pipeline that **scrapes retailer listings**, **normalises product data**, and serves ranked results (value-first) plus **price history** and **all-time low** summaries
 
+- **Retailers:** 4 (SprintFit, NoWhey, Xplosiv, NZProtein)
+- **Ingestion:** Daily scrape via cron (~03:00 NZT) -> Postgres -> Rebuild read tables
+- **Data:** 24,683 raw listing snapshots in `public.scraped_products`
+- **Canonical identity:** `(category, brand_normalised, product_normalised, weight_grams)` (+ flavour normalisation)
+- **Resilience:** Continues on single-retailer timeout/block; rebuilds from available sources and refreshes fully on next successful scrape
+
 ---
 
 ## Problem & Approach
