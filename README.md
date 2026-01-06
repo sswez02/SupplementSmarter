@@ -51,6 +51,15 @@ SupplementSmarter addresses this by:
 
 ---
 
+## Docs
+
+- Architecture: `docs/architecture.md`
+- Schema (PDF): `docs/schema/schema.pdf`
+- Deploy: `docs/deploy.md`
+- Normalisation & matching: `docs/normalisation_matching.md`
+
+---
+
 ## Technical Overview
 
 ### Frontend
