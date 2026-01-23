@@ -72,6 +72,54 @@ function addYears(d: Date, years: number) {
   return next;
 }
 
+function getDateTicks(data: { date: string }[], latestDate: Date | null): string[] {
+  if (!data.length) return [];
+
+  // If we have 7 or fewer data points, show all dates
+  if (data.length <= 7) {
+    return data.map((d) => d.date);
+  }
+
+  // Otherwise, show every 7 days working backwards from the latest date
+  const end = latestDate ?? new Date();
+  const ticks: string[] = [];
+  const dataDateSet = new Set(data.map((d) => d.date));
+
+  // Find the earliest date in data
+  const earliestDate = new Date(data[0].date);
+
+  // Work backwards from end date in 7-day intervals
+  let current = new Date(end);
+  while (current >= earliestDate) {
+    const dateStr = current.toISOString().split('T')[0];
+    // Add if this date exists in our data, or find the nearest date
+    if (dataDateSet.has(dateStr)) {
+      ticks.unshift(dateStr);
+    } else {
+      // Find nearest date in data within 3 days
+      for (let offset = 1; offset <= 3; offset++) {
+        const before = new Date(current);
+        before.setDate(before.getDate() - offset);
+        const after = new Date(current);
+        after.setDate(after.getDate() + offset);
+        const beforeStr = before.toISOString().split('T')[0];
+        const afterStr = after.toISOString().split('T')[0];
+        if (dataDateSet.has(beforeStr)) {
+          ticks.unshift(beforeStr);
+          break;
+        }
+        if (dataDateSet.has(afterStr)) {
+          ticks.unshift(afterStr);
+          break;
+        }
+      }
+    }
+    current.setDate(current.getDate() - 7);
+  }
+
+  return [...new Set(ticks)]; // Remove duplicates
+}
+
 export default function CreatineHistoryChart({ rows }: { rows: HistoryRow[] }) {
   const [mounted, setMounted] = useState(false);
   const [range, setRange] = useState<RangeKey>('ALL'); // default: all time
@@ -111,7 +159,7 @@ export default function CreatineHistoryChart({ rows }: { rows: HistoryRow[] }) {
     });
   }, [rows, range, latestDate]);
 
-  const { data, retailers, globalMinPrice, domainMin, domainMax, ticks } = useMemo(() => {
+  const { data, retailers, globalMinPrice, domainMin, domainMax, ticks, xTicks } = useMemo(() => {
     const byDate = new Map<string, any>();
     const names = new Set<string>();
 
@@ -138,6 +186,8 @@ export default function CreatineHistoryChart({ rows }: { rows: HistoryRow[] }) {
 
     const sorted = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 
+    const xTicks = getDateTicks(sorted, latestDate);
+
     const padding = 10;
     const baseMin = globalMinPrice ?? 0;
     const baseMax = globalMaxPrice ?? baseMin;
@@ -159,8 +209,9 @@ export default function CreatineHistoryChart({ rows }: { rows: HistoryRow[] }) {
       domainMin,
       domainMax,
       ticks,
+      xTicks,
     };
-  }, [filteredRows]);
+  }, [filteredRows, latestDate]);
 
   if (!mounted || !data.length) return null;
 
@@ -207,6 +258,7 @@ export default function CreatineHistoryChart({ rows }: { rows: HistoryRow[] }) {
                   tick={{ fill: 'rgba(0,0,0,0.45)', fontSize: 12 }}
                   axisLine={{ stroke: 'rgba(0,0,0,0.08)' }}
                   tickLine={{ stroke: 'rgba(0,0,0,0.08)' }}
+                  ticks={xTicks}
                 />
 
                 <YAxis
