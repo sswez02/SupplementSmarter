@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import Navbar from '@/components/Navbar';
 import CreatineHistoryTable from '@/components/creatine/CreatineHistoryTable';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { apiFetch } from '@/lib/api';
 
 type Product = {
   brand: string | null;
@@ -18,12 +19,7 @@ export default function CreatineHistory() {
 
     (async () => {
       try {
-        const res = await fetch(`/api/creatine/${productSlug}`);
-        if (!res.ok) {
-          console.error('Failed to fetch creatine product', res.status);
-          return;
-        }
-        const data = await res.json();
+        const data = await apiFetch<{ product: Product }>(`/api/creatine/${productSlug}`);
         setProduct(data.product);
       } catch (err) {
         console.error('Error fetching /api/creatine/:slug', err);

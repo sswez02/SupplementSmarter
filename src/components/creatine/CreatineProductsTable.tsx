@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Globe } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import LogosMobile from '@/assets/stocks/logos_mobile.png';
+import { apiFetch } from '@/lib/api';
 
 // Brand replacements for capitalisation
 const BRAND_DISPLAY_OVERRIDES: Record<string, string> = {
@@ -235,9 +236,7 @@ export default function CreatineTable() {
     // Load table with api/creatine
     (async () => {
       try {
-        const res = await fetch('/api/creatine');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const data = await apiFetch<any[]>('/api/creatine');
 
         if (!cancelled && Array.isArray(data)) {
           setRows(data);

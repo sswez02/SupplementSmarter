@@ -1,6 +1,7 @@
 import Navbar from '@/components/Navbar';
 import ProteinHistoryTable from '@/components/protein/ProteinHistoryTable';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { apiFetch } from '@/lib/api';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -17,9 +18,12 @@ export default function ProteinHistory() {
     if (!productSlug) return;
 
     (async () => {
-      const res = await fetch(`/api/protein/${productSlug}`);
-      const data = await res.json();
-      setProduct(data.product);
+      try {
+        const data = await apiFetch<{ product: Product }>(`/api/protein/${productSlug}`);
+        setProduct(data.product);
+      } catch (err) {
+        console.error('Error fetching /api/protein/:slug', err);
+      }
     })();
   }, [productSlug]);
 

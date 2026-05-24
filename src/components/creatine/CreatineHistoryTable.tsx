@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Globe } from 'lucide-react';
 import PriceGlow from '@/assets/stocks/gradient_background.png';
 import CreatineHistoryChart from './CreatineHistoryChart';
+import { apiFetch } from '@/lib/api';
 
 type OfferRow = {
   retailer: string;
@@ -99,9 +100,8 @@ export default function CreatineProductDetail() {
 
     (async () => {
       try {
-        const res = await fetch(`/api/creatine/${productSlug}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as DetailResponse;
+        const data = await apiFetch<DetailResponse>(`/api/creatine/${productSlug}`);
+
         if (!cancelled) {
           setDetail(data);
           setError(null);
@@ -127,8 +127,8 @@ export default function CreatineProductDetail() {
           detail.product.weightGrams ? ` ${detail.product.weightGrams / 1000}kg` : ''
         }`
       : productSlug
-      ? `Product ${productSlug}`
-      : 'Product';
+        ? `Product ${productSlug}`
+        : 'Product';
 
   const grouped = useMemo<[string, OfferRow[]][]>(() => {
     if (!detail?.offers) return [];
@@ -167,7 +167,7 @@ export default function CreatineProductDetail() {
           url: best?.url,
         };
       }),
-    [grouped]
+    [grouped],
   );
 
   const retailerCount = retailerRows.length;

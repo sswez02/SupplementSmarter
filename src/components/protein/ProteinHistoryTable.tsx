@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Globe } from 'lucide-react';
 import PriceGlow from '@/assets/stocks/gradient_background.png';
 import ProteinHistoryChart from './ProteinHistoryChart';
+import { apiFetch } from '@/lib/api';
 
 type OfferRow = {
   retailer: string;
@@ -101,9 +102,8 @@ export default function ProductDetail() {
 
     (async () => {
       try {
-        const res = await fetch(`/api/protein/${productSlug}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as DetailResponse;
+        const data = await apiFetch<DetailResponse>(`/api/protein/${productSlug}`);
+
         if (!cancelled) {
           setDetail(data);
           setError(null);
@@ -130,8 +130,8 @@ export default function ProductDetail() {
           detail.product.weightGrams ? ` ${detail.product.weightGrams / 1000}kg` : ''
         }`
       : productSlug
-      ? `Product ${productSlug}`
-      : 'Product';
+        ? `Product ${productSlug}`
+        : 'Product';
 
   // Group offers by retailer
   const grouped = useMemo<[string, OfferRow[]][]>(() => {
@@ -173,7 +173,7 @@ export default function ProductDetail() {
           url: best?.url,
         };
       }),
-    [grouped]
+    [grouped],
   );
 
   const retailerCount = retailerRows.length;

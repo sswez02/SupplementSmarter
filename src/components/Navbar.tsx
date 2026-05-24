@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { apiFetch } from '@/lib/api';
 
 // Helper to get the product title
 function titleFromSlug(s = '') {
@@ -50,11 +51,12 @@ export default function Nav() {
     const update = (e: MediaQueryListEvent | MediaQueryList) => {
       setIsMobile(e.matches);
     };
-    // initial value
+
     update(mq);
-    // listen for changes
+
     const handler = (e: MediaQueryListEvent) => update(e);
     mq.addEventListener('change', handler);
+
     return () => {
       mq.removeEventListener('change', handler);
     };
@@ -83,8 +85,8 @@ export default function Nav() {
   const searchPlaceholder = isProtein
     ? 'Search protein products e.g. "Gold Standard Whey"'
     : isCreatine
-    ? 'Search creatine e.g. "Gold Series Creatine X8"'
-    : 'Search supplements e.g. "Optimum Nutrition"';
+      ? 'Search creatine e.g. "Gold Series Creatine X8"'
+      : 'Search supplements e.g. "Optimum Nutrition"';
 
   // Fetch autocomplete suggestions when searchValue changes
   useEffect(() => {
@@ -98,15 +100,15 @@ export default function Nav() {
     const endpointBase = isProtein
       ? '/api/protein/suggest'
       : isCreatine
-      ? '/api/creatine/suggest'
-      : '/api/supplements/suggest'; // API endpoint
+        ? '/api/creatine/suggest'
+        : '/api/supplements/suggest'; // API endpoint
 
     let cancelled = false; // new search started
     const handle = setTimeout(async () => {
       try {
-        const res = await fetch(`${endpointBase}?q=${encodeURIComponent(query)}`);
-        if (!res.ok) return;
-        const data: ApiSuggestion[] = await res.json();
+        const data = await apiFetch<ApiSuggestion[]>(
+          `${endpointBase}?q=${encodeURIComponent(query)}`,
+        );
 
         if (cancelled) return;
 
@@ -114,6 +116,7 @@ export default function Nav() {
           const label = [row.brand, row.name].filter(Boolean).join(' '); // eg: Optimum Nutrition Gold Standard Whey
           const subtitle =
             row.weight_grams && row.weight_grams > 0 ? `${row.weight_grams} g` : undefined; // eg: 2000 g
+
           return {
             id: String(row.product_id ?? `${label}-${subtitle ?? ''}`),
             label: label || row.name,
@@ -121,7 +124,7 @@ export default function Nav() {
           };
         });
 
-        setSuggestions(mapped); // sugggestions list
+        setSuggestions(mapped); // suggestions list
         setShowSuggestions(mapped.length > 0);
       } catch {
         if (!cancelled) {
@@ -285,6 +288,7 @@ export default function Nav() {
                     isCreatine ? 'translate-x-full' : 'translate-x-0',
                   ].join(' ')}
                 />
+
                 <div className='relative z-10 flex w-full h-full gap-1'>
                   <Link
                     to={withQS('/protein')}
@@ -296,6 +300,7 @@ export default function Nav() {
                   >
                     Protein
                   </Link>
+
                   <Link
                     to={withQS('/creatine')}
                     aria-current={isCreatine ? 'page' : undefined}
