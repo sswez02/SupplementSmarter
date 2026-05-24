@@ -36,7 +36,8 @@
     "test:unit": "vitest run test/unit",
     "test:api": "vitest run test/api",
     "test:scrape": "vitest run test/scrapers",
-    "test:ci": "npm run test:unit && npm run test:api"
+    "test:ci": "npm run test:unit && npm run test:api",
+    "daily:update": "npm run scrape:all && npm run scrape:creatine:all && npm run db:apply:norm && npm run db:build"
   },
   "keywords": [],
   "author": "",

@@ -110,6 +110,19 @@ CREATE TABLE IF NOT EXISTS price_history(
 );
 
 -- 1 row per (category × product × size × retailer × entry date)
-ALTER TABLE price_history
-  ADD CONSTRAINT price_history_unique_per_entry UNIQUE (category, product_id, weight_grams, retailer, snapshot_date);
+-- Safe to rerun: only adds the constraint if it does not already exist.
+DO $$
+BEGIN
+  IF NOT EXISTS(
+    SELECT
+      1
+    FROM
+      pg_constraint
+    WHERE
+      conname = 'price_history_unique_per_entry') THEN
+  ALTER TABLE price_history
+    ADD CONSTRAINT price_history_unique_per_entry UNIQUE(category, product_id, weight_grams, retailer, snapshot_date);
+END IF;
+END
+$$;
 

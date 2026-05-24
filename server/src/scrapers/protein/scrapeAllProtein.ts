@@ -14,52 +14,60 @@ const SCRAPERS = {
   nowhey: scrapeNoWheyProtein,
 } as const satisfies Record<string, ResultsOne>;
 
+type ScraperKey = keyof typeof SCRAPERS;
+
 (async () => {
-  const order = [
-    'nzprotein',
-    'xplosiv',
-    'sprintfit',
-    'nowhey',
-    'chemistwarehouse',
-  ] as (keyof typeof SCRAPERS)[];
-  const summary: Record<keyof typeof SCRAPERS, { products: number; errors: number }> = {} as any;
+  const order: ScraperKey[] = ['nzprotein', 'xplosiv', 'sprintfit', 'nowhey'];
+
+  const summary: Record<ScraperKey, { products: number; errors: number }> = {} as any;
 
   const seen = new Set<string>();
 
   for (const key of order) {
     if (seen.has(key)) continue;
     seen.add(key);
+
     console.log(`\n=== protein:${key} ===`);
+
     const run = SCRAPERS[key];
     let out: Awaited<ReturnType<ResultsOne>>;
 
     try {
       out = await run();
     } catch (e: any) {
-      out = { products: [], errors: [`${key} failed: ${e?.message || String(e)}`] };
+      out = {
+        products: [],
+        errors: [`${key} failed: ${e?.message || String(e)}`],
+      };
     }
 
     const { products, errors } = out;
 
+    const productsToSave = products.map((p) => ({
+      ...p,
+      flavours: Array.isArray(p.flavours) && p.flavours.length > 0 ? p.flavours : ['Default'],
+    }));
+
+    // Show product sample
+    if (products.length > 0) {
+      console.log(`[${key}] first products sample:`);
+      console.dir(products.slice(0, 3), { depth: null });
+    }
+
+    // Show error sample
+    if (errors.length > 0) {
+      console.log(`[${key}] first errors:`);
+      console.dir(errors.slice(0, 10), { depth: null });
+    }
+
     // Save to database
     try {
-      await saveProducts(products, 'protein');
+      await saveProducts(productsToSave, 'protein');
     } catch (e: any) {
       console.error(`[${key}] DB insert failed:`, e?.message || e);
     }
 
     summary[key] = { products: products.length, errors: errors.length };
-
-    // Show a small products sample in testing
-    // if (testing) {
-    //   const sample = products.slice(0, 3);
-    //   console.log(`[${key}] first 3 sample:`, sample);
-    // }
-
-    // Show a small errors sample in testing
-    // if (testing && errors.length) {
-    //   console.log(`[${key}] first 3 errors:`, errors.slice(0, 3));
-    // }
   }
 
   // Summary
